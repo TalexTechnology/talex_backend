@@ -31,7 +31,7 @@ La API queda en `http://127.0.0.1:8080`. Flutter local usa `--dart-define=TALEX_
 
 El handler serverless está en `api/index.js`. Todas las rutas se reescriben ahí.
 
-1. Conecta el repo `TalexTechnology/talex_backend` a Vercel.
+1. El repo `TalexTechnology/talex_backend` está conectado al team [tale-x](https://vercel.com/tale-x/talex-backend).
 2. En **Settings → Environment Variables** carga las mismas claves de `.env.example` (nunca el archivo `.env`).
 3. En cPanel → **Remote MySQL** agrega `%`. Las funciones de Vercel cambian de IP.
 4. `FIREBASE_SERVICE_ACCOUNT` es el JSON de la service account de Firebase, en una sola línea.
