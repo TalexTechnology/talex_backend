@@ -27,22 +27,37 @@ npm run dev
 
 La API queda en `http://127.0.0.1:8080`. Flutter local usa `--dart-define=TALEX_API_URL=http://127.0.0.1:8080`.
 
-## Vercel
+## cPanel (Colombia Hosting)
 
-El handler serverless está en `api/index.js`. Todas las rutas se reescriben ahí.
+La API corre en el mismo servidor que MySQL. `MYSQL_HOST` es `127.0.0.1`. No hace falta Remote MySQL ni el comodín `%`.
 
-1. El repo `TalexTechnology/talex_backend` está conectado al team [tale-x](https://vercel.com/tale-x/talex-backend).
-2. En **Settings → Environment Variables** carga las mismas claves de `.env.example` (nunca el archivo `.env`).
-3. En cPanel → **Remote MySQL** agrega `%`. Las funciones de Vercel cambian de IP.
-4. `FIREBASE_SERVICE_ACCOUNT` es el JSON de la service account de Firebase, en una sola línea.
-5. Health check: `https://talex-backend.vercel.app/health` debe devolver `{"ok":true,"database":"mysql"}`.
+La rama que el servidor ejecuta se llama `cpanel-live`. GitHub Actions la actualiza así:
 
-Producción actual: https://talex-backend.vercel.app
+- Un push a `develop` publica `develop`.
+- Un pull request hacia `develop` publica ese pull request.
+- Al cerrar el pull request sin merge, la API vuelve a `develop`.
 
-Flutter en producción:
+cPanel tiene que seguir la rama `cpanel-live` y ejecutar `.cpanel.yml` en cada pull. Ese script copia el código a `~/talex-backend`, instala dependencias con el Node de cPanel y reinicia la app.
+
+En **Setup Node.js App**, una sola vez:
+
+| Campo | Valor |
+|---|---|
+| Node | 20 |
+| Application root | `talex-backend` |
+| Application startup file | `app.js` |
+| Application URL | un subdominio propio, por ejemplo `api.talex.com.co` |
+
+Variables de entorno (las mismas claves de `.env.example`, nunca el archivo `.env`):
+
+`MYSQL_HOST=127.0.0.1`, `MYSQL_PORT=3306`, `MYSQL_DATABASE=talexcom_talex`, `MYSQL_USER=talexcom_talex_user`, `MYSQL_PASSWORD`, `FIREBASE_PROJECT_ID=talex-platform`, `FIREBASE_SERVICE_ACCOUNT` (el JSON en una sola línea).
+
+Health check: `https://api.talex.com.co/health` debe devolver `{"ok":true,"database":"mysql"}`.
+
+Flutter en ese entorno:
 
 ```text
---dart-define=TALEX_API_URL=https://talex-backend.vercel.app
+--dart-define=TALEX_API_URL=https://api.talex.com.co
 ```
 
 ## Superadmin
