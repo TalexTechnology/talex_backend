@@ -18,7 +18,6 @@ function loadEnvFile(path) {
 }
 
 loadEnvFile(resolve(process.cwd(), '.env'));
-loadEnvFile(resolve(process.cwd(), '../.env'));
 
 function env(name, fallback = '') {
   return String(process.env[name] ?? fallback).trim();
