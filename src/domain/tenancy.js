@@ -1,4 +1,4 @@
-import {queryOne} from '../db.js';
+import {findMany, findOne} from './store.js';
 import {ApiError} from '../http.js';
 
 const UUID =
@@ -13,49 +13,26 @@ export function publicEntityId(id, firebaseId) {
   return firebase || id;
 }
 
-export async function resolveOrganizationId(value) {
+async function resolveId(collection, value, firebaseField) {
   if (!value) return null;
   if (isUuid(value)) {
-    const row = await queryOne('SELECT id FROM organizations WHERE id = :id LIMIT 1', {
-      id: value,
-    });
-    if (row) return row.id;
+    const byId = await findOne(collection, {id: value});
+    if (byId) return byId.id;
   }
-  const row = await queryOne(
-    'SELECT id FROM organizations WHERE firebase_id = :id LIMIT 1',
-    {id: value},
-  );
+  const row = await findOne(collection, {[firebaseField]: value});
   return row?.id ?? null;
 }
 
-export async function resolveVacancyId(value) {
-  if (!value) return null;
-  if (isUuid(value)) {
-    const row = await queryOne('SELECT id FROM vacancies WHERE id = :id LIMIT 1', {
-      id: value,
-    });
-    if (row) return row.id;
-  }
-  const row = await queryOne(
-    'SELECT id FROM vacancies WHERE firebase_id = :id LIMIT 1',
-    {id: value},
-  );
-  return row?.id ?? null;
+export function resolveOrganizationId(value) {
+  return resolveId('organizations', value, 'firebase_id');
 }
 
-export async function resolveApplicationId(value) {
-  if (!value) return null;
-  if (isUuid(value)) {
-    const row = await queryOne('SELECT id FROM applications WHERE id = :id LIMIT 1', {
-      id: value,
-    });
-    if (row) return row.id;
-  }
-  const row = await queryOne(
-    'SELECT id FROM applications WHERE firebase_candidate_id = :id LIMIT 1',
-    {id: value},
-  );
-  return row?.id ?? null;
+export function resolveVacancyId(value) {
+  return resolveId('vacancies', value, 'firebase_id');
+}
+
+export function resolveApplicationId(value) {
+  return resolveId('applications', value, 'firebase_candidate_id');
 }
 
 export function assertSignedIn(actor) {
@@ -68,20 +45,12 @@ export function canWriteOrg(actor, organizationId) {
 }
 
 export async function ownsApplication(actor, applicationId) {
-  const row = await queryOne(
-    `SELECT a.id
-     FROM applications a
-     JOIN persons p ON p.id = a.person_id
-     WHERE a.id = :applicationId
-       AND (p.linked_profile_id = :profileId OR p.email = :email)
-     LIMIT 1`,
-    {
-      applicationId,
-      profileId: actor.profile.id,
-      email: actor.profile.email,
-    },
-  );
-  return Boolean(row);
+  const application = await findOne('applications', {id: applicationId});
+  if (!application) return false;
+  const persons = await findMany('persons', {
+    $or: [{linked_profile_id: actor.profile.id}, {email: actor.profile.email}],
+  }, {limit: 20});
+  return persons.some((person) => person.id === application.person_id);
 }
 
 export function assertCanWriteOrg(actor, organizationId) {
@@ -92,4 +61,22 @@ export function assertCanWriteOrg(actor, organizationId) {
 
 export function assertBankManager(actor) {
   if (!actor.isSuperadmin) throw new ApiError(403, 'permission_denied');
+}
+
+export async function activeMembership(profileId) {
+  const memberships = await findMany(
+    'memberships',
+    {profile_id: profileId, is_active: true},
+    {sort: {created_at: 1}, limit: 1},
+  );
+  const membership = memberships[0];
+  if (!membership) return null;
+  const organization = await findOne('organizations', {id: membership.organization_id});
+  return {
+    organization_id: membership.organization_id,
+    role: membership.role,
+    legacy_role: membership.legacy_role,
+    organization_name: organization?.name ?? null,
+    organization_firebase_id: organization?.firebase_id ?? null,
+  };
 }

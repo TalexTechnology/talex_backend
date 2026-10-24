@@ -15,7 +15,7 @@ export async function handleRequest(request, response) {
     const url = new URL(request.url, 'http://localhost');
     if (request.method === 'GET' && url.pathname === '/health') {
       await pingDatabase();
-      json(response, 200, {ok: true, database: 'mysql'});
+      json(response, 200, {ok: true, database: 'mongodb'});
       return;
     }
 
@@ -24,11 +24,7 @@ export async function handleRequest(request, response) {
       json(
         response,
         200,
-        await handleRpc(
-          url.pathname.slice('/v1/rpc/'.length),
-          actor,
-          await readBody(request),
-        ),
+        await handleRpc(url.pathname.slice('/v1/rpc/'.length), actor, await readBody(request)),
       );
       return;
     }
@@ -54,11 +50,9 @@ if (!process.env.VERCEL) {
     console.log(`TaleX API on :${config.port}`);
     try {
       await pingDatabase();
-      console.log(
-        `MySQL ok ${config.mysql.user}@${config.mysql.host}:${config.mysql.port}/${config.mysql.database}`,
-      );
+      console.log(`MongoDB ok database=${config.mongodbDatabase}`);
     } catch (error) {
-      console.error('MySQL no responde:', error.code, error.message);
+      console.error('MongoDB no responde:', error.code, error.message);
     }
   });
 }

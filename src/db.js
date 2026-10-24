@@ -1,59 +1,102 @@
-import mysql from 'mysql2/promise';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import {MongoClient} from 'mongodb';
 import {config} from './config.js';
+import {ensureIndexes} from './indexes.js';
+import {ensureSeed} from './seed.js';
 
-export const pool = mysql.createPool({
-  host: config.mysql.host,
-  port: config.mysql.port,
-  database: config.mysql.database,
-  user: config.mysql.user,
-  password: config.mysql.password,
-  waitForConnections: true,
-  connectionLimit: process.env.VERCEL ? 4 : 10,
-  namedPlaceholders: true,
-  timezone: 'Z',
-});
+const sessions = new AsyncLocalStorage();
+let client;
+let database;
+let connecting;
 
-export async function query(sql, params = {}) {
-  try {
-    const [rows] = await pool.query(sql, params);
-    return rows;
-  } catch (error) {
-    throw mysqlError(error);
+export function currentSession() {
+  return sessions.getStore();
+}
+
+function options() {
+  const session = currentSession();
+  return session ? {session} : {};
+}
+
+export async function connectDatabase() {
+  if (database) return database;
+  if (!connecting) connecting = open();
+  return connecting;
+}
+
+async function open() {
+  if (!config.mongodbUri) {
+    const error = new Error('mongodb_unconfigured');
+    error.status = 503;
+    error.code = 'mongodb_unconfigured';
+    throw error;
   }
+  client = new MongoClient(config.mongodbUri, {serverSelectionTimeoutMS: 8000});
+  try {
+    await client.connect();
+    database = client.db(config.mongodbDatabase);
+    await ensureIndexes(database);
+    await ensureSeed(database);
+    return database;
+  } catch (error) {
+    connecting = null;
+    client = null;
+    database = null;
+    throw mongoError(error);
+  }
+}
+
+export function collection(name) {
+  if (!database) throw new Error('mongodb_unconfigured');
+  return database.collection(name);
+}
+
+export function driverOptions() {
+  return options();
 }
 
 export async function pingDatabase() {
-  await query('SELECT 1 AS ok');
+  const db = await connectDatabase();
+  await db.command({ping: 1});
 }
 
-function mysqlError(error) {
-  const code = error.code || '';
-  if (code === 'ECONNREFUSED') {
-    return Object.assign(new Error('mysql_unreachable'), {
-      status: 503,
-      code: 'mysql_unreachable',
+export async function withTransaction(work) {
+  await connectDatabase();
+  const session = client.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      result = await sessions.run(session, work);
     });
+    return result;
+  } finally {
+    await session.endSession();
   }
-  if (code === 'ER_ACCESS_DENIED_ERROR' || code === 'ER_DBACCESS_DENIED_ERROR') {
-    return Object.assign(new Error('mysql_access_denied'), {
-      status: 503,
-      code: 'mysql_access_denied',
-    });
+}
+
+export async function closeDatabase() {
+  if (client) await client.close();
+  client = null;
+  database = null;
+  connecting = null;
+}
+
+export function mongoError(error) {
+  if (error?.code === 11000) {
+    return Object.assign(new Error('duplicate'), {status: 409, code: 'duplicate'});
   }
-  if (code === 'ER_BAD_DB_ERROR') {
-    return Object.assign(new Error('mysql_database_missing'), {
+  if (
+    error?.name === 'MongoServerSelectionError' ||
+    error?.name === 'MongoNetworkError' ||
+    error?.code === 'ENOTFOUND'
+  ) {
+    return Object.assign(new Error('mongodb_unreachable'), {
       status: 503,
-      code: 'mysql_database_missing',
+      code: 'mongodb_unreachable',
     });
   }
   return Object.assign(error, {
     status: error.status || 500,
-    code: error.code || 'mysql_error',
-    message: error.message,
+    code: error.code || 'mongodb_error',
   });
-}
-
-export async function queryOne(sql, params = {}) {
-  const rows = await query(sql, params);
-  return Array.isArray(rows) ? rows[0] ?? null : null;
 }

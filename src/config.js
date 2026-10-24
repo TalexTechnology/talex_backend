@@ -18,6 +18,7 @@ function loadEnvFile(path) {
 }
 
 loadEnvFile(resolve(process.cwd(), '.env'));
+loadEnvFile(resolve(process.cwd(), '../.env'));
 
 function env(name, fallback = '') {
   return String(process.env[name] ?? fallback).trim();
@@ -34,11 +35,6 @@ export const config = {
     .split(',')
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean),
-  mysql: {
-    host: env('MYSQL_HOST', '127.0.0.1'),
-    port: Number(env('MYSQL_PORT', '3306')),
-    database: env('MYSQL_DATABASE', 'talex'),
-    user: env('MYSQL_USER', 'talex'),
-    password: env('MYSQL_PASSWORD', 'talex0000'),
-  },
+  mongodbUri: env('MONGODB_URI', ''),
+  mongodbDatabase: env('MONGODB_DB', 'talex'),
 };

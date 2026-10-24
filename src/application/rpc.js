@@ -1,16 +1,29 @@
 import {randomUUID} from 'node:crypto';
-import {query, queryOne} from '../db.js';
+import {withTransaction} from '../db.js';
 import {ApiError} from '../http.js';
 import {asList, hashInvitePin, normalizeEmail, randomToken, sha256Hex, verifyInvitePin} from '../domain/crypto.js';
+import {
+  count,
+  daysFromNow,
+  deleteMany,
+  findMany,
+  findOne,
+  insertOne,
+  minutesFromNow,
+  updateMany,
+  updateOne,
+  upsertOne,
+} from '../domain/store.js';
 import {upsertProfile} from '../services/session.js';
 import {publicRow} from '../domain/rows.js';
 import {
+  activeMembership,
   assertBankManager,
   assertCanWriteOrg,
   assertSignedIn,
   canWriteOrg,
-  ownsApplication,
   isUuid,
+  ownsApplication,
   publicEntityId,
   resolveApplicationId,
   resolveOrganizationId,
@@ -24,6 +37,13 @@ function pick(data, ...keys) {
   return null;
 }
 
+async function personForProfile(profile) {
+  return (
+    (await findOne('persons', {linked_profile_id: profile.id})) ||
+    (await findOne('persons', {email: profile.email}))
+  );
+}
+
 export async function currentSessionProfile(actor) {
   assertSignedIn(actor);
   const profile = actor.profile;
@@ -31,30 +51,20 @@ export async function currentSessionProfile(actor) {
   let organization = null;
   if (actor.membership) {
     role = actor.membership.legacy_role || actor.membership.role;
-    organization = await queryOne(
-      'SELECT * FROM organizations WHERE id = :id',
-      {id: actor.membership.organization_id},
-    );
+    organization = await findOne('organizations', {id: actor.membership.organization_id});
   }
-  const person = await queryOne(
-    `SELECT * FROM persons
-     WHERE linked_profile_id = :profileId OR email = :email
-     ORDER BY CASE WHEN linked_profile_id = :linkedId THEN 0 ELSE 1 END
-     LIMIT 1`,
-    {profileId: profile.id, linkedId: profile.id, email: profile.email},
-  );
+  const person = await personForProfile(profile);
   let application = null;
   if (person) {
-    application = await queryOne(
-      `SELECT * FROM applications WHERE person_id = :personId
-       ORDER BY created_at DESC LIMIT 1`,
-      {personId: person.id},
+    const applications = await findMany(
+      'applications',
+      {person_id: person.id},
+      {sort: {created_at: -1}, limit: 1},
     );
+    application = applications[0] || null;
     if (role === 'user' && application) role = 'respondent';
     if (!organization && application) {
-      organization = await queryOne('SELECT * FROM organizations WHERE id = :id', {
-        id: application.organization_id,
-      });
+      organization = await findOne('organizations', {id: application.organization_id});
     }
   }
   return {
@@ -88,6 +98,14 @@ const STAFF_ROLES = new Set([
   'hr',
 ]);
 
+async function findOrganization(orgKey) {
+  if (isUuid(orgKey)) {
+    const byId = await findOne('organizations', {id: orgKey});
+    if (byId) return byId;
+  }
+  return findOne('organizations', {firebase_id: orgKey});
+}
+
 export async function syncIdentityWorkspace(actor, body) {
   assertSignedIn(actor);
   const profile = await upsertProfile({
@@ -104,65 +122,79 @@ export async function syncIdentityWorkspace(actor, body) {
       ? 'company_admin'
       : '';
   if (!profile.is_superadmin && orgKey && staffRole) {
-    let organization = await queryOne(
-      `SELECT * FROM organizations
-       WHERE firebase_id = :orgKey OR id = :orgKey
-       LIMIT 1`,
-      {orgKey},
-    );
+    let organization = await findOrganization(orgKey);
     if (!organization) {
       const organizationId = isUuid(orgKey) ? orgKey : randomUUID();
-      await query(
-        `INSERT INTO organizations (id, firebase_id, name, status)
-         VALUES (:id, :firebaseId, :name, 'active')`,
-        {
-          id: organizationId,
-          firebaseId: orgKey,
-          name: orgName || 'Empresa',
-        },
-      );
-      organization = await queryOne('SELECT * FROM organizations WHERE id = :id', {
+      organization = await insertOne('organizations', {
         id: organizationId,
+        firebase_id: orgKey,
+        name: orgName || 'Empresa',
+        status: 'active',
+        archived: false,
+        created_at: new Date(),
+        updated_at: new Date(),
       });
     } else if (orgName) {
-      await query(
-        `UPDATE organizations SET name = COALESCE(NULLIF(:name, ''), name) WHERE id = :id`,
-        {id: organization.id, name: orgName},
-      );
+      organization = await updateOne('organizations', {id: organization.id}, {
+        name: orgName,
+        updated_at: new Date(),
+      });
     }
-    const mapped = await queryOne(
-      `SELECT membership_role FROM legacy_role_map WHERE firestore_role = :role LIMIT 1`,
-      {role: staffRole},
-    );
-    const membershipRole = mapped?.membership_role || 'company_admin';
-    await query(
-      `INSERT INTO memberships (id, organization_id, profile_id, role, legacy_role, is_active)
-       VALUES (:id, :organizationId, :profileId, :role, :legacyRole, 1)
-       ON DUPLICATE KEY UPDATE role = VALUES(role), legacy_role = VALUES(legacy_role), is_active = 1`,
+    const mapped = await findOne('legacy_role_map', {firestore_role: staffRole});
+    await upsertOne(
+      'memberships',
+      {organization_id: organization.id, profile_id: profile.id},
       {
-        id: randomUUID(),
-        organizationId: organization.id,
-        profileId: profile.id,
-        role: membershipRole,
-        legacyRole: roleRaw,
+        role: mapped?.membership_role || 'company_admin',
+        legacy_role: roleRaw,
+        is_active: true,
+        updated_at: new Date(),
       },
+      {id: randomUUID(), created_at: new Date()},
     );
   }
   return currentSessionProfile({
     firebaseUid: actor.firebaseUid,
     email: profile.email,
     profile,
-    membership: await queryOne(
-      `SELECT m.organization_id, m.role, m.legacy_role, o.name AS organization_name,
-              o.firebase_id AS organization_firebase_id
-       FROM memberships m
-       JOIN organizations o ON o.id = m.organization_id
-       WHERE m.profile_id = :profileId AND m.is_active = 1
-       ORDER BY m.created_at ASC
-       LIMIT 1`,
-      {profileId: profile.id},
-    ),
+    membership: await activeMembership(profile.id),
     isSuperadmin: Boolean(profile.is_superadmin),
+  });
+}
+
+async function cultureAnswers(organizationId) {
+  const sessions = await findMany('survey_sessions', {
+    organization_id: organizationId,
+    purpose: 'culture_perception',
+    status: 'completed',
+  }, {limit: 5000});
+  if (!sessions.length) return [];
+  const answers = await findMany('survey_answers', {
+    session_id: {$in: sessions.map((item) => item.id)},
+  }, {limit: 20000});
+  const questions = await findMany('survey_questions', {
+    id: {$in: [...new Set(answers.map((item) => item.question_id))]},
+  }, {limit: 5000});
+  const questionById = new Map(questions.map((item) => [item.id, item]));
+  const sections = await findMany('survey_sections', {
+    id: {$in: [...new Set(questions.map((item) => item.section_id))]},
+  }, {limit: 500});
+  const sectionById = new Map(sections.map((item) => [item.id, item]));
+  return answers.map((answer) => {
+    const question = questionById.get(answer.question_id) || {};
+    const section = sectionById.get(question.section_id) || {};
+    return {
+      section_code: section.code,
+      format: answer.format,
+      value_int: answer.value_int,
+      value_text: answer.value_text,
+      statement_a: answer.statement_a,
+      statement_b: answer.statement_b,
+      dimension_a: question.dimension_a,
+      dimension_b: question.dimension_b,
+      q_a: question.statement_a,
+      q_b: question.statement_b,
+    };
   });
 }
 
@@ -172,27 +204,12 @@ export async function organizationSurveyCulture(actor, body) {
   if (!actor.isSuperadmin && !canWriteOrg(actor, organizationId) && !(await ownsOrgSession(actor, organizationId))) {
     throw new ApiError(403, 'permission_denied');
   }
-  const countRow = await queryOne(
-    `SELECT COUNT(*) AS respondentCount
-     FROM survey_sessions
-     WHERE organization_id = :organizationId
-       AND purpose = 'culture_perception'
-       AND status = 'completed'`,
-    {organizationId},
-  );
-  const respondents = Number(countRow?.respondentCount || 0);
-  const answers = await query(
-    `SELECT sec.code AS section_code, a.format, a.value_int, a.value_text,
-            a.statement_a, a.statement_b, q.dimension_a, q.dimension_b, q.statement_a AS q_a, q.statement_b AS q_b
-     FROM survey_sessions s
-     JOIN survey_answers a ON a.session_id = s.id
-     JOIN survey_questions q ON q.id = a.question_id
-     JOIN survey_sections sec ON sec.id = q.section_id
-     WHERE s.organization_id = :organizationId
-       AND s.purpose = 'culture_perception'
-       AND s.status = 'completed'`,
-    {organizationId},
-  );
+  const respondents = await count('survey_sessions', {
+    organization_id: organizationId,
+    purpose: 'culture_perception',
+    status: 'completed',
+  });
+  const answers = await cultureAnswers(organizationId);
   const buckets = {values: new Map(), culture: new Map(), standout: new Map(), sought: new Map()};
   for (const row of answers) {
     const section = String(row.section_code || '');
@@ -233,74 +250,62 @@ export async function organizationSurveyCulture(actor, body) {
 }
 
 async function ownsOrgSession(actor, organizationId) {
-  const row = await queryOne(
-    `SELECT a.id
-     FROM applications a
-     JOIN persons p ON p.id = a.person_id
-     WHERE a.organization_id = :organizationId
-       AND (p.linked_profile_id = :profileId OR p.email = :email)
-     LIMIT 1`,
-    {organizationId, profileId: actor.profile.id, email: actor.profile.email},
-  );
-  return Boolean(row);
+  const persons = await findMany('persons', {
+    $or: [{linked_profile_id: actor.profile.id}, {email: actor.profile.email}],
+  }, {limit: 20});
+  if (!persons.length) return false;
+  const application = await findOne('applications', {
+    organization_id: organizationId,
+    person_id: {$in: persons.map((item) => item.id)},
+  });
+  return Boolean(application);
 }
 
 export async function saveOrganizationProfile(actor, body) {
   const organizationId = await resolveOrganizationId(body.p_organization_id);
   if (!organizationId) throw new ApiError(403, 'permission_denied');
   assertCanWriteOrg(actor, organizationId);
-  await query(
-    `UPDATE organizations
-     SET name = COALESCE(NULLIF(:name, ''), name),
-         nit = :nit, logo_url = :logoUrl, sector = :sector, size_label = :sizeLabel,
-         city = :city, country = :country, region = :region, website = :website,
-         description = :description, last_activity_at = CURRENT_TIMESTAMP(6)
-     WHERE id = :organizationId`,
-    {
-      organizationId,
-      name: String(body.p_name || '').trim(),
-      nit: body.p_nit ?? null,
-      logoUrl: body.p_logo_url ?? null,
-      sector: body.p_sector ?? null,
-      sizeLabel: body.p_size ?? null,
-      city: body.p_city ?? null,
-      country: body.p_country ?? null,
-      region: body.p_region ?? null,
-      website: body.p_website ?? null,
-      description: body.p_description ?? null,
-    },
+  const current = await findOne('organizations', {id: organizationId});
+  const name = String(body.p_name || '').trim();
+  await updateOne('organizations', {id: organizationId}, {
+    name: name || current?.name,
+    nit: body.p_nit ?? null,
+    logo_url: body.p_logo_url ?? null,
+    sector: body.p_sector ?? null,
+    size_label: body.p_size ?? null,
+    city: body.p_city ?? null,
+    country: body.p_country ?? null,
+    region: body.p_region ?? null,
+    website: body.p_website ?? null,
+    description: body.p_description ?? null,
+    last_activity_at: new Date(),
+    updated_at: new Date(),
+  });
+  await updateMany('organization_culture_versions', {
+    organization_id: organizationId,
+    is_current: true,
+  }, {is_current: false, updated_at: new Date()});
+  const latest = await findMany(
+    'organization_culture_versions',
+    {organization_id: organizationId},
+    {sort: {version_number: -1}, limit: 1},
   );
-  await query(
-    `UPDATE organization_culture_versions SET is_current = 0
-     WHERE organization_id = :organizationId AND is_current = 1`,
-    {organizationId},
-  );
-  const version = await queryOne(
-    `SELECT COALESCE(MAX(version_number), 0) + 1 AS next_version
-     FROM organization_culture_versions WHERE organization_id = :organizationId`,
-    {organizationId},
-  );
-  await query(
-    `INSERT INTO organization_culture_versions
-      (id, organization_id, version_number, values_list, culture_list, standout_list,
-       sought_characteristics, is_current, published_by)
-     VALUES (:id, :organizationId, :version, :valuesList, :cultureList, :standoutList,
-             :sought, 1, :profileId)`,
-    {
-      id: randomUUID(),
-      organizationId,
-      version: version.next_version,
-      valuesList: JSON.stringify(asList(body.p_values)),
-      cultureList: JSON.stringify(asList(body.p_culture)),
-      standoutList: JSON.stringify(asList(body.p_standout)),
-      sought: body.p_sought ?? null,
-      profileId: actor.profile.id,
-    },
-  );
-  await query(
-    'UPDATE profiles SET must_review_company_dna = 0 WHERE id = :id',
-    {id: actor.profile.id},
-  );
+  await insertOne('organization_culture_versions', {
+    id: randomUUID(),
+    organization_id: organizationId,
+    version_number: (latest[0]?.version_number || 0) + 1,
+    values_list: asList(body.p_values),
+    culture_list: asList(body.p_culture),
+    standout_list: asList(body.p_standout),
+    sought_characteristics: body.p_sought ?? null,
+    is_current: true,
+    published_by: actor.profile.id,
+    published_at: new Date(),
+  });
+  await updateOne('profiles', {id: actor.profile.id}, {
+    must_review_company_dna: false,
+    updated_at: new Date(),
+  });
   return {ok: true};
 }
 
@@ -312,61 +317,62 @@ export async function provisionOrganization(actor, body) {
   if (!email.includes('@')) throw new ApiError(400, 'invalid_email');
   const pin = String(body.p_pin || '').trim() || String(100000 + Math.floor(Math.random() * 900000));
   const organizationId = randomUUID();
-  await query(
-    `INSERT INTO organizations
-      (id, firebase_id, name, nit, logo_url, sector, size_label, city, country, region,
-       website, description, status)
-     VALUES (:id, :id, :name, :nit, :logoUrl, :sector, :sizeLabel, :city, :country, :region,
-             :website, :description, 'onboarding')`,
-    {
+  await withTransaction(async () => {
+    await insertOne('organizations', {
       id: organizationId,
+      firebase_id: organizationId,
       name,
       nit: body.p_nit ?? null,
-      logoUrl: body.p_logo_url ?? null,
+      logo_url: body.p_logo_url ?? null,
       sector: body.p_sector ?? null,
-      sizeLabel: body.p_size ?? null,
+      size_label: body.p_size ?? null,
       city: body.p_city ?? null,
       country: body.p_country ?? null,
       region: body.p_region ?? null,
       website: body.p_website ?? null,
       description: body.p_description ?? null,
-    },
-  );
-  await query(
-    `INSERT INTO organization_culture_versions
-      (id, organization_id, version_number, values_list, culture_list, standout_list,
-       sought_characteristics, is_current, published_by)
-     VALUES (:id, :organizationId, 1, :valuesList, :cultureList, :standoutList, :sought, 1, :profileId)`,
-    {
+      status: 'onboarding',
+      archived: false,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    await insertOne('organization_culture_versions', {
       id: randomUUID(),
-      organizationId,
-      valuesList: JSON.stringify(asList(body.p_values)),
-      cultureList: JSON.stringify(asList(body.p_culture)),
-      standoutList: JSON.stringify(asList(body.p_standout)),
-      sought: body.p_sought ?? null,
-      profileId: actor.profile.id,
-    },
-  );
-  await query(
-    `INSERT INTO activation_invites
-      (id, email, organization_id, kind, role, pin_hash, pin_algorithm, used,
-       first_name, last_name, pin_expires_at)
-     VALUES (:id, :email, :organizationId, 'recruiter', 'company_admin', :pinHash, 'fnv1a32', 0,
-             :firstName, :lastName, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 15 MINUTE))`,
-    {
+      organization_id: organizationId,
+      version_number: 1,
+      values_list: asList(body.p_values),
+      culture_list: asList(body.p_culture),
+      standout_list: asList(body.p_standout),
+      sought_characteristics: body.p_sought ?? null,
+      is_current: true,
+      published_by: actor.profile.id,
+      published_at: new Date(),
+    });
+    await insertOne('activation_invites', {
       id: randomUUID(),
       email,
-      organizationId,
-      pinHash: hashInvitePin(pin, email),
-      firstName: body.p_recruiter_first_name ?? null,
-      lastName: body.p_recruiter_last_name ?? null,
-    },
-  );
-  await query(
-    `INSERT INTO activity_events (id, organization_id, actor_profile_id, kind, entity_name, status_label)
-     VALUES (:id, :organizationId, :profileId, 'companyCreated', :name, 'onboarding')`,
-    {id: randomUUID(), organizationId, profileId: actor.profile.id, name},
-  );
+      organization_id: organizationId,
+      kind: 'recruiter',
+      role: 'company_admin',
+      pin_hash: hashInvitePin(pin, email),
+      pin_algorithm: 'fnv1a32',
+      used: false,
+      first_name: body.p_recruiter_first_name ?? null,
+      last_name: body.p_recruiter_last_name ?? null,
+      pin_expires_at: minutesFromNow(15),
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    await insertOne('activity_events', {
+      id: randomUUID(),
+      organization_id: organizationId,
+      actor_profile_id: actor.profile.id,
+      kind: 'companyCreated',
+      entity_name: name,
+      status_label: 'onboarding',
+      created_at: new Date(),
+    });
+  });
   return {organizationId, pin};
 }
 
@@ -374,12 +380,12 @@ export async function activateInvitePin(actor, body) {
   assertSignedIn(actor);
   const pin = String(body.p_pin || '').trim();
   if (pin.length < 6) throw new ApiError(400, 'invalid_pin');
-  const invite = await queryOne(
-    `SELECT * FROM activation_invites
-     WHERE email = :email AND kind = 'recruiter' AND used = 0
-     ORDER BY created_at DESC LIMIT 1`,
-    {email: actor.profile.email},
-  );
+  const invites = await findMany('activation_invites', {
+    email: actor.profile.email,
+    kind: 'recruiter',
+    used: false,
+  }, {sort: {created_at: -1}, limit: 1});
+  const invite = invites[0];
   if (!invite) throw new ApiError(404, 'invite_missing');
   if (invite.pin_expires_at && new Date(invite.pin_expires_at) <= new Date()) {
     throw new ApiError(400, 'pin_expired');
@@ -387,41 +393,29 @@ export async function activateInvitePin(actor, body) {
   if (!verifyInvitePin(pin, actor.profile.email, invite.pin_hash)) {
     throw new ApiError(400, 'invalid_pin');
   }
-  const mapped = await queryOne(
-    'SELECT membership_role FROM legacy_role_map WHERE firestore_role = :role LIMIT 1',
-    {role: invite.role || 'recruiter'},
-  );
-  const membershipId = randomUUID();
-  await query(
-    `INSERT INTO memberships (id, organization_id, profile_id, role, legacy_role, is_active)
-     VALUES (:id, :organizationId, :profileId, :role, :legacyRole, 1)
-     ON DUPLICATE KEY UPDATE role = VALUES(role), legacy_role = VALUES(legacy_role), is_active = 1`,
+  const mapped = await findOne('legacy_role_map', {firestore_role: invite.role || 'recruiter'});
+  await upsertOne(
+    'memberships',
+    {organization_id: invite.organization_id, profile_id: actor.profile.id},
     {
-      id: membershipId,
-      organizationId: invite.organization_id,
-      profileId: actor.profile.id,
       role: mapped?.membership_role || 'recruiter',
-      legacyRole: invite.role,
+      legacy_role: invite.role,
+      is_active: true,
+      updated_at: new Date(),
     },
+    {id: randomUUID(), created_at: new Date()},
   );
-  await query(
-    `UPDATE profiles
-     SET display_name = COALESCE(NULLIF(TRIM(CONCAT_WS(' ', :firstName, :lastName)), ''), display_name),
-         document_number = COALESCE(:documentNumber, document_number),
-         must_change_password = 0,
-         must_review_company_dna = 0
-     WHERE id = :id`,
-    {
-      firstName: invite.first_name,
-      lastName: invite.last_name,
-      documentNumber: invite.document_number,
-      id: actor.profile.id,
-    },
-  );
-  await query('UPDATE activation_invites SET used = 1 WHERE id = :id', {id: invite.id});
-  const organization = await queryOne('SELECT * FROM organizations WHERE id = :id', {
-    id: invite.organization_id,
+  const profile = await findOne('profiles', {id: actor.profile.id});
+  const displayName = [invite.first_name, invite.last_name].filter(Boolean).join(' ').trim();
+  await updateOne('profiles', {id: actor.profile.id}, {
+    display_name: displayName || profile?.display_name || null,
+    document_number: invite.document_number || profile?.document_number || null,
+    must_change_password: false,
+    must_review_company_dna: false,
+    updated_at: new Date(),
   });
+  await updateOne('activation_invites', {id: invite.id}, {used: true, updated_at: new Date()});
+  const organization = await findOne('organizations', {id: invite.organization_id});
   return {
     organizationId: publicEntityId(organization.id, organization.firebase_id),
     role: invite.role || 'recruiter',
@@ -434,27 +428,27 @@ export async function createStaffInvite(actor, body) {
   assertCanWriteOrg(actor, organizationId);
   const email = normalizeEmail(body.p_email);
   const pin = String(body.p_pin || '').trim() || String(100000 + Math.floor(Math.random() * 900000));
-  await query(
-    `UPDATE activation_invites SET used = 1
-     WHERE email = :email AND organization_id = :organizationId AND kind = 'recruiter' AND used = 0`,
-    {email, organizationId},
-  );
-  await query(
-    `INSERT INTO activation_invites
-      (id, email, organization_id, kind, role, pin_hash, pin_algorithm, used,
-       first_name, last_name, pin_expires_at)
-     VALUES (:id, :email, :organizationId, 'recruiter', :role, :pinHash, 'fnv1a32', 0,
-             :firstName, :lastName, DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 15 MINUTE))`,
-    {
-      id: randomUUID(),
-      email,
-      organizationId,
-      role: String(body.p_role || 'recruiter').trim() || 'recruiter',
-      pinHash: hashInvitePin(pin, email),
-      firstName: body.p_first_name ?? null,
-      lastName: body.p_last_name ?? null,
-    },
-  );
+  await updateMany('activation_invites', {
+    email,
+    organization_id: organizationId,
+    kind: 'recruiter',
+    used: false,
+  }, {used: true, updated_at: new Date()});
+  await insertOne('activation_invites', {
+    id: randomUUID(),
+    email,
+    organization_id: organizationId,
+    kind: 'recruiter',
+    role: String(body.p_role || 'recruiter').trim() || 'recruiter',
+    pin_hash: hashInvitePin(pin, email),
+    pin_algorithm: 'fnv1a32',
+    used: false,
+    first_name: body.p_first_name ?? null,
+    last_name: body.p_last_name ?? null,
+    pin_expires_at: minutesFromNow(15),
+    created_at: new Date(),
+    updated_at: new Date(),
+  });
   return {pin};
 }
 
@@ -463,210 +457,190 @@ export async function createRespondentApplication(actor, body) {
   const vacancyId = await resolveVacancyId(body.p_vacancy_id);
   if (!organizationId || !vacancyId) throw new ApiError(403, 'permission_denied');
   assertCanWriteOrg(actor, organizationId);
-  const vacancy = await queryOne('SELECT * FROM vacancies WHERE id = :id', {id: vacancyId});
+  const vacancy = await findOne('vacancies', {id: vacancyId});
   if (!vacancy || vacancy.organization_id !== organizationId) {
     throw new ApiError(403, 'permission_denied');
   }
   const email = normalizeEmail(body.p_email);
   const token = String(body.p_token || '').trim() || randomToken();
   const displayName = String(body.p_display_name || '').trim();
-  const personId = randomUUID();
-  await query(
-    `INSERT INTO persons (id, email, document_number, display_name)
-     VALUES (:id, :email, :documentNumber, :displayName)
-     ON DUPLICATE KEY UPDATE
-       document_number = COALESCE(VALUES(document_number), document_number),
-       display_name = COALESCE(VALUES(display_name), display_name)`,
-    {
-      id: personId,
-      email,
-      documentNumber: String(body.p_document_number || '').trim() || null,
-      displayName: displayName || null,
-    },
-  );
-  const person = await queryOne('SELECT id FROM persons WHERE email = :email', {email});
-  const applicationId = randomUUID();
-  await query(
-    `INSERT INTO applications
-      (id, organization_id, vacancy_id, person_id, vacancy_name, process_status, firebase_candidate_id)
-     VALUES (:id, :organizationId, :vacancyId, :personId, :vacancyName, 'pending', :id)
-     ON DUPLICATE KEY UPDATE vacancy_name = VALUES(vacancy_name)`,
-    {
-      id: applicationId,
-      organizationId,
-      vacancyId,
-      personId: person.id,
-      vacancyName: vacancy.name,
-    },
-  );
-  const application = await queryOne(
-    `SELECT * FROM applications
-     WHERE organization_id = :organizationId AND vacancy_id = :vacancyId AND person_id = :personId`,
-    {organizationId, vacancyId, personId: person.id},
-  );
-  if (!application.firebase_candidate_id) {
-    await query(
-      'UPDATE applications SET firebase_candidate_id = id WHERE id = :id',
-      {id: application.id},
-    );
+  const documentNumber = String(body.p_document_number || '').trim() || null;
+  const existingPerson = await findOne('persons', {email});
+  const person = existingPerson
+    ? await updateOne('persons', {id: existingPerson.id}, {
+        document_number: documentNumber || existingPerson.document_number || null,
+        display_name: displayName || existingPerson.display_name || null,
+        updated_at: new Date(),
+      })
+    : await insertOne('persons', {
+        id: randomUUID(),
+        email,
+        document_number: documentNumber,
+        display_name: displayName || null,
+        linked_profile_id: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      });
+  let application = await findOne('applications', {
+    organization_id: organizationId,
+    vacancy_id: vacancyId,
+    person_id: person.id,
+  });
+  if (!application) {
+    const id = randomUUID();
+    application = await insertOne('applications', {
+      id,
+      organization_id: organizationId,
+      vacancy_id: vacancyId,
+      person_id: person.id,
+      vacancy_name: vacancy.name,
+      process_status: 'pending',
+      firebase_candidate_id: id,
+      company_affinity: 'unknown',
+      vacancy_affinity: 'unknown',
+      evaluation_completed: false,
+      result_requested: false,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+  } else {
+    application = await updateOne('applications', {id: application.id}, {
+      vacancy_name: vacancy.name,
+      updated_at: new Date(),
+    });
+    if (!application.firebase_candidate_id) {
+      application = await updateOne('applications', {id: application.id}, {
+        firebase_candidate_id: application.id,
+        updated_at: new Date(),
+      });
+    }
   }
   const [firstName, ...rest] = displayName.split(' ');
-  await query(
-    `INSERT INTO activation_invites
-      (id, email, organization_id, vacancy_id, kind, role, token_hash, used, application_id,
-       first_name, last_name, document_number, token_expires_at)
-     VALUES (:id, :email, :organizationId, :vacancyId, 'respondent', 'respondent', :tokenHash, 0,
-             :applicationId, :firstName, :lastName, :documentNumber,
-             DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 14 DAY))`,
-    {
-      id: randomUUID(),
-      email,
-      organizationId,
-      vacancyId,
-      tokenHash: sha256Hex(token),
-      applicationId: application.id,
-      firstName: firstName || null,
-      lastName: rest.join(' ') || null,
-      documentNumber: String(body.p_document_number || '').trim() || null,
-    },
-  );
+  await insertOne('activation_invites', {
+    id: randomUUID(),
+    email,
+    organization_id: organizationId,
+    vacancy_id: vacancyId,
+    kind: 'respondent',
+    role: 'respondent',
+    token_hash: sha256Hex(token),
+    used: false,
+    application_id: application.id,
+    first_name: firstName || null,
+    last_name: rest.join(' ') || null,
+    document_number: documentNumber,
+    token_expires_at: daysFromNow(14),
+    created_at: new Date(),
+    updated_at: new Date(),
+  });
   return {
     applicationId: publicEntityId(application.id, application.firebase_candidate_id || application.id),
     token,
   };
 }
 
+async function publishedAffinityVersion() {
+  const template = await findOne('survey_templates', {slug: 'affinity-core'});
+  if (!template) return null;
+  const versions = await findMany('survey_versions', {
+    template_id: template.id,
+    status: 'published',
+  }, {sort: {version_number: -1}, limit: 1});
+  return versions[0] || null;
+}
+
 export async function saveAffinityAnswer(actor, body) {
   const applicationId = await resolveApplicationId(body.p_application_id);
-  const application = applicationId
-    ? await queryOne('SELECT * FROM applications WHERE id = :id', {id: applicationId})
-    : null;
+  const application = applicationId ? await findOne('applications', {id: applicationId}) : null;
   if (!application) throw new ApiError(404, 'assessment_missing');
-  if (
-    !canWriteOrg(actor, application.organization_id) &&
-    !(await ownsApplication(actor, application.id))
-  ) {
+  if (!canWriteOrg(actor, application.organization_id) && !(await ownsApplication(actor, application.id))) {
     throw new ApiError(403, 'permission_denied');
   }
   const value = Number(body.p_value);
   if (!Number.isInteger(value) || value < 1 || value > 5) {
     throw new ApiError(400, 'invalid_answer');
   }
-  const version = await queryOne(
-    `SELECT v.id FROM survey_versions v
-     JOIN survey_templates t ON t.id = v.template_id
-     WHERE t.slug = 'affinity-core' AND v.status = 'published'
-     ORDER BY v.version_number DESC LIMIT 1`,
-  );
-  let session = await queryOne(
-    `SELECT id FROM survey_sessions
-     WHERE application_id = :applicationId AND purpose = 'affinity'
-     ORDER BY started_at DESC LIMIT 1`,
-    {applicationId: application.id},
-  );
+  const version = await publishedAffinityVersion();
+  if (!version) throw new ApiError(404, 'survey_missing');
+  const sessions = await findMany('survey_sessions', {
+    application_id: application.id,
+    purpose: 'affinity',
+  }, {sort: {started_at: -1}, limit: 1});
+  let session = sessions[0];
   if (!session) {
-    const sessionId = randomUUID();
-    await query(
-      `INSERT INTO survey_sessions
-        (id, version_id, purpose, organization_id, application_id, person_id, status)
-       VALUES (:id, :versionId, 'affinity', :organizationId, :applicationId, :personId, 'in_progress')`,
-      {
-        id: sessionId,
-        versionId: version?.id,
-        organizationId: application.organization_id,
-        applicationId: application.id,
-        personId: application.person_id,
-      },
-    );
-    session = {id: sessionId};
+    session = await insertOne('survey_sessions', {
+      id: randomUUID(),
+      version_id: version.id,
+      purpose: 'affinity',
+      organization_id: application.organization_id,
+      application_id: application.id,
+      person_id: application.person_id,
+      status: 'in_progress',
+      locale: 'es',
+      started_at: new Date(),
+    });
   }
-  const question = await queryOne(
-    'SELECT id, code, format, statement_a, statement_b FROM survey_questions WHERE code = :code LIMIT 1',
-    {code: body.p_question_code},
-  );
+  const question = await findOne('survey_questions', {code: body.p_question_code});
   if (!question) throw new ApiError(400, 'invalid_question');
-  const answerId = randomUUID();
-  await query(
-    `INSERT INTO survey_answers
-      (id, session_id, question_id, value_int, question_code, format, statement_a, statement_b)
-     VALUES (:id, :sessionId, :questionId, :valueInt, :code, :format, :statementA, :statementB)
-     ON DUPLICATE KEY UPDATE value_int = VALUES(value_int)`,
+  await upsertOne(
+    'survey_answers',
+    {session_id: session.id, question_id: question.id},
     {
-      id: answerId,
-      sessionId: session.id,
-      questionId: question.id,
-      valueInt: value,
-      code: question.code,
+      value_int: value,
+      question_code: question.code,
       format: question.format,
-      statementA: question.statement_a,
-      statementB: question.statement_b,
+      statement_a: question.statement_a,
+      statement_b: question.statement_b,
+      updated_at: new Date(),
     },
+    {id: randomUUID(), created_at: new Date()},
   );
-  await query(
-    `UPDATE applications SET process_status = 'inProgress'
-     WHERE id = :id AND process_status = 'pending'`,
-    {id: application.id},
-  );
+  if (application.process_status === 'pending') {
+    await updateOne('applications', {id: application.id}, {
+      process_status: 'inProgress',
+      updated_at: new Date(),
+    });
+  }
   return {ok: true};
 }
 
 export async function completeAffinityEvaluation(actor, body) {
   const applicationId = await resolveApplicationId(body.p_application_id);
-  const application = applicationId
-    ? await queryOne('SELECT * FROM applications WHERE id = :id', {id: applicationId})
-    : null;
+  const application = applicationId ? await findOne('applications', {id: applicationId}) : null;
   if (!application) throw new ApiError(404, 'assessment_missing');
-  if (
-    !canWriteOrg(actor, application.organization_id) &&
-    !(await ownsApplication(actor, application.id))
-  ) {
+  if (!canWriteOrg(actor, application.organization_id) && !(await ownsApplication(actor, application.id))) {
     throw new ApiError(403, 'permission_denied');
   }
-  const session = await queryOne(
-    `SELECT id FROM survey_sessions
-     WHERE application_id = :applicationId AND purpose = 'affinity'
-     ORDER BY started_at DESC LIMIT 1`,
-    {applicationId: application.id},
-  );
+  const sessions = await findMany('survey_sessions', {
+    application_id: application.id,
+    purpose: 'affinity',
+  }, {sort: {started_at: -1}, limit: 1});
+  const session = sessions[0];
   if (session) {
-    await query(
-      `UPDATE survey_sessions
-       SET status = 'completed', completed_at = CURRENT_TIMESTAMP(6)
-       WHERE id = :id`,
-      {id: session.id},
-    );
+    await updateOne('survey_sessions', {id: session.id}, {
+      status: 'completed',
+      completed_at: new Date(),
+    });
   }
-  await query(
-    `UPDATE applications
-     SET process_status = 'completed', evaluation_completed = 1,
-         vacancy_affinity = COALESCE(:vacancyAffinity, vacancy_affinity)
-     WHERE id = :id`,
-    {id: application.id, vacancyAffinity: body.p_vacancy_affinity ?? null},
-  );
-  const evaluationId = randomUUID();
-  await query(
-    `INSERT INTO affinity_evaluations
-      (id, application_id, session_id, organization_id, firebase_evaluation_id, status,
-       dimension_scores, completed_at)
-     VALUES (:id, :applicationId, :sessionId, :organizationId, :firebaseId, 'completed',
-             :scores, CURRENT_TIMESTAMP(6))
-     ON DUPLICATE KEY UPDATE
-       session_id = VALUES(session_id),
-       status = 'completed',
-       dimension_scores = VALUES(dimension_scores),
-       completed_at = CURRENT_TIMESTAMP(6)`,
+  await updateOne('applications', {id: application.id}, {
+    process_status: 'completed',
+    evaluation_completed: true,
+    vacancy_affinity: body.p_vacancy_affinity ?? application.vacancy_affinity,
+    updated_at: new Date(),
+  });
+  const evaluation = await upsertOne(
+    'affinity_evaluations',
+    {application_id: application.id},
     {
-      id: evaluationId,
-      applicationId: application.id,
-      sessionId: session?.id ?? null,
-      organizationId: application.organization_id,
-      firebaseId: application.firebase_candidate_id || application.id,
-      scores: JSON.stringify(body.p_dimension_scores ?? null),
+      session_id: session?.id ?? null,
+      organization_id: application.organization_id,
+      firebase_evaluation_id: application.firebase_candidate_id || application.id,
+      status: 'completed',
+      dimension_scores: body.p_dimension_scores ?? null,
+      completed_at: new Date(),
+      updated_at: new Date(),
     },
-  );
-  const evaluation = await queryOne(
-    'SELECT id FROM affinity_evaluations WHERE application_id = :id',
-    {id: application.id},
+    {id: randomUUID(), created_at: new Date()},
   );
   return {
     applicationId: publicEntityId(application.id, application.firebase_candidate_id),
@@ -676,47 +650,42 @@ export async function completeAffinityEvaluation(actor, body) {
 }
 
 async function currentSurveyVersion(slug) {
-  const row = await queryOne(
-    `SELECT v.*
-     FROM survey_versions v
-     JOIN survey_templates t ON t.id = v.template_id
-     WHERE t.slug = :slug
-     ORDER BY CASE v.status WHEN 'published' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
-              v.version_number DESC
-     LIMIT 1`,
-    {slug},
+  const template = await findOne('survey_templates', {slug});
+  if (!template) throw new ApiError(404, 'survey_missing');
+  const versions = await findMany('survey_versions', {template_id: template.id}, {limit: 50});
+  const rank = {published: 0, draft: 1};
+  versions.sort(
+    (a, b) =>
+      (rank[a.status] ?? 2) - (rank[b.status] ?? 2) || b.version_number - a.version_number,
   );
-  if (!row) throw new ApiError(404, 'survey_missing');
-  return row;
+  if (!versions[0]) throw new ApiError(404, 'survey_missing');
+  return versions[0];
+}
+
+async function sectionsFor(versionId) {
+  return findMany('survey_sections', {version_id: versionId}, {limit: 200});
 }
 
 async function ensureSection(versionId, code, title) {
-  const existing = await queryOne(
-    'SELECT * FROM survey_sections WHERE version_id = :versionId AND code = :code',
-    {versionId, code},
-  );
+  const existing = await findOne('survey_sections', {version_id: versionId, code});
   if (existing) return existing;
-  const next = await queryOne(
-    'SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort FROM survey_sections WHERE version_id = :versionId',
-    {versionId},
-  );
-  const id = randomUUID();
-  await query(
-    `INSERT INTO survey_sections (id, version_id, code, title, sort_order)
-     VALUES (:id, :versionId, :code, :title, :sortOrder)`,
-    {id, versionId, code, title: title || code, sortOrder: next.next_sort},
-  );
-  return queryOne('SELECT * FROM survey_sections WHERE id = :id', {id});
+  const sections = await sectionsFor(versionId);
+  const sortOrder = sections.reduce((max, item) => Math.max(max, item.sort_order || 0), 0) + 1;
+  return insertOne('survey_sections', {
+    id: randomUUID(),
+    version_id: versionId,
+    code,
+    title: title || code,
+    sort_order: sortOrder,
+  });
 }
 
 async function questionPayload(question) {
-  const section = await queryOne('SELECT * FROM survey_sections WHERE id = :id', {
-    id: question.section_id,
-  });
-  const options = await query(
-    `SELECT label FROM survey_options
-     WHERE question_id = :id ORDER BY sort_order, value_int`,
-    {id: question.id},
+  const section = await findOne('survey_sections', {id: question.section_id});
+  const options = await findMany(
+    'survey_options',
+    {question_id: question.id},
+    {sort: {sort_order: 1, value_int: 1}, limit: 50},
   );
   return {
     id: question.id,
@@ -738,16 +707,20 @@ async function questionPayload(question) {
   };
 }
 
+async function questionsInVersion(versionId) {
+  const sections = await sectionsFor(versionId);
+  if (!sections.length) return [];
+  const questions = await findMany('survey_questions', {
+    section_id: {$in: sections.map((item) => item.id)},
+  }, {limit: 2000});
+  questions.sort((a, b) => a.sort_order - b.sort_order || String(a.code).localeCompare(String(b.code)));
+  return questions;
+}
+
 export async function listSurveyBank(actor, body) {
   assertBankManager(actor);
   const version = await currentSurveyVersion(body.p_slug);
-  const questions = await query(
-    `SELECT q.* FROM survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     WHERE s.version_id = :versionId
-     ORDER BY q.sort_order, q.code`,
-    {versionId: version.id},
-  );
+  const questions = await questionsInVersion(version.id);
   return Promise.all(questions.map(questionPayload));
 }
 
@@ -775,66 +748,35 @@ export async function upsertSurveyQuestion(actor, body) {
     sectionCode,
     pick(question, 'sectionTitle', 'section_title'),
   );
-  const existing = await queryOne(
-    `SELECT q.* FROM survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     WHERE s.version_id = :versionId AND q.code = :code LIMIT 1`,
-    {versionId: version.id, code},
-  );
-  const payload = {
-    sectionId: section.id,
+  const existing = (await questionsInVersion(version.id)).find((item) => item.code === code);
+  const fields = {
+    section_id: section.id,
     format,
     instruction: pick(question, 'instruction'),
-    statementA: pick(question, 'statementA', 'statement_a') || code,
-    statementB: pick(question, 'statementB', 'statement_b'),
-    dimensionA: pick(question, 'dimensionA', 'dimension_a'),
-    dimensionB: pick(question, 'dimensionB', 'dimension_b'),
-    timeLimit: pick(question, 'timeLimitSeconds', 'time_limit_seconds'),
-    sortOrder: pick(question, 'order', 'sort_order') ?? 0,
-    required: pick(question, 'required', 'is_required') !== false ? 1 : 0,
-    active: pick(question, 'active', 'is_active') !== false ? 1 : 0,
+    statement_a: pick(question, 'statementA', 'statement_a') || code,
+    statement_b: pick(question, 'statementB', 'statement_b'),
+    dimension_a: pick(question, 'dimensionA', 'dimension_a'),
+    dimension_b: pick(question, 'dimensionB', 'dimension_b'),
+    time_limit_seconds: pick(question, 'timeLimitSeconds', 'time_limit_seconds'),
+    sort_order: pick(question, 'order', 'sort_order') ?? 0,
+    is_required: pick(question, 'required', 'is_required') !== false,
+    is_active: pick(question, 'active', 'is_active') !== false,
   };
-  let questionId = existing?.id;
-  if (!existing) {
-    questionId = randomUUID();
-    await query(
-      `INSERT INTO survey_questions
-        (id, section_id, code, format, instruction, statement_a, statement_b,
-         dimension_a, dimension_b, time_limit_seconds, sort_order, is_required, is_active)
-       VALUES (:id, :sectionId, :code, :format, :instruction, :statementA, :statementB,
-               :dimensionA, :dimensionB, :timeLimit, :sortOrder, :required, :active)`,
-      {id: questionId, code, ...payload},
-    );
-  } else {
-    await query(
-      `UPDATE survey_questions
-       SET section_id = :sectionId, format = :format, instruction = :instruction,
-           statement_a = :statementA, statement_b = :statementB, dimension_a = :dimensionA,
-           dimension_b = :dimensionB, time_limit_seconds = :timeLimit, sort_order = :sortOrder,
-           is_required = :required, is_active = :active
-       WHERE id = :id`,
-      {id: questionId, ...payload},
-    );
-  }
-  await query('DELETE FROM survey_options WHERE question_id = :id', {id: questionId});
+  const saved = existing
+    ? await updateOne('survey_questions', {id: existing.id}, fields)
+    : await insertOne('survey_questions', {id: randomUUID(), code, ...fields});
+  await deleteMany('survey_options', {question_id: saved.id});
   const options = asList(question.options);
   for (const [index, label] of options.entries()) {
-    await query(
-      `INSERT INTO survey_options (id, question_id, value_int, label, sort_order)
-       VALUES (:id, :questionId, :valueInt, :label, :sortOrder)`,
-      {
-        id: randomUUID(),
-        questionId,
-        valueInt: index + 1,
-        label: String(label),
-        sortOrder: index + 1,
-      },
-    );
+    await insertOne('survey_options', {
+      id: randomUUID(),
+      question_id: saved.id,
+      value_int: index + 1,
+      label: String(label),
+      sort_order: index + 1,
+    });
   }
-  const saved = await queryOne('SELECT * FROM survey_questions WHERE id = :id', {
-    id: questionId,
-  });
-  return questionPayload(saved);
+  return questionPayload(await findOne('survey_questions', {id: saved.id}));
 }
 
 export async function replaceSurveyBank(actor, body) {
@@ -846,28 +788,18 @@ export async function replaceSurveyBank(actor, body) {
     await upsertSurveyQuestion(actor, {p_slug: body.p_slug, p_question: question});
     uploaded.push(String(question.code || '').toUpperCase());
   }
-  const existing = await query(
-    `SELECT q.id, q.code FROM survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     WHERE s.version_id = :versionId`,
-    {versionId: version.id},
-  );
+  const existing = await questionsInVersion(version.id);
   let removed = 0;
   let deactivated = 0;
   for (const question of existing) {
     if (uploaded.includes(question.code)) continue;
-    const used = await queryOne(
-      'SELECT id FROM survey_answers WHERE question_id = :id LIMIT 1',
-      {id: question.id},
-    );
+    const used = await findOne('survey_answers', {question_id: question.id});
     if (used) {
-      await query('UPDATE survey_questions SET is_active = 0 WHERE id = :id', {
-        id: question.id,
-      });
+      await updateOne('survey_questions', {id: question.id}, {is_active: false});
       deactivated += 1;
     } else {
-      await query('DELETE FROM survey_options WHERE question_id = :id', {id: question.id});
-      await query('DELETE FROM survey_questions WHERE id = :id', {id: question.id});
+      await deleteMany('survey_options', {question_id: question.id});
+      await deleteMany('survey_questions', {id: question.id});
       removed += 1;
     }
   }
@@ -877,23 +809,13 @@ export async function replaceSurveyBank(actor, body) {
 export async function setSurveyQuestionActive(actor, body) {
   assertBankManager(actor);
   const version = await currentSurveyVersion(body.p_slug);
-  await query(
-    `UPDATE survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     SET q.is_active = :active
-     WHERE s.version_id = :versionId AND q.code = :code`,
-    {
-      active: body.p_active ? 1 : 0,
-      versionId: version.id,
-      code: String(body.p_code || '').toUpperCase(),
-    },
-  );
-  const question = await queryOne(
-    `SELECT q.* FROM survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     WHERE s.version_id = :versionId AND q.code = :code`,
-    {versionId: version.id, code: String(body.p_code || '').toUpperCase()},
-  );
+  const code = String(body.p_code || '').toUpperCase();
+  const sections = await sectionsFor(version.id);
+  await updateMany('survey_questions', {
+    section_id: {$in: sections.map((item) => item.id)},
+    code,
+  }, {is_active: Boolean(body.p_active)});
+  const question = (await questionsInVersion(version.id)).find((item) => item.code === code);
   if (!question) throw new ApiError(404, 'question_missing');
   return questionPayload(question);
 }
@@ -901,51 +823,27 @@ export async function setSurveyQuestionActive(actor, body) {
 export async function swapSurveyQuestionOrder(actor, body) {
   assertBankManager(actor);
   const version = await currentSurveyVersion(body.p_slug);
-  const first = await queryOne(
-    `SELECT q.id, q.sort_order FROM survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     WHERE s.version_id = :versionId AND q.code = :code`,
-    {versionId: version.id, code: String(body.p_code_a || '').toUpperCase()},
-  );
-  const second = await queryOne(
-    `SELECT q.id, q.sort_order FROM survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     WHERE s.version_id = :versionId AND q.code = :code`,
-    {versionId: version.id, code: String(body.p_code_b || '').toUpperCase()},
-  );
+  const questions = await questionsInVersion(version.id);
+  const first = questions.find((item) => item.code === String(body.p_code_a || '').toUpperCase());
+  const second = questions.find((item) => item.code === String(body.p_code_b || '').toUpperCase());
   if (!first || !second) throw new ApiError(404, 'question_missing');
-  await query('UPDATE survey_questions SET sort_order = :sortOrder WHERE id = :id', {
-    id: first.id,
-    sortOrder: second.sort_order,
-  });
-  await query('UPDATE survey_questions SET sort_order = :sortOrder WHERE id = :id', {
-    id: second.id,
-    sortOrder: first.sort_order,
-  });
+  await updateOne('survey_questions', {id: first.id}, {sort_order: second.sort_order});
+  await updateOne('survey_questions', {id: second.id}, {sort_order: first.sort_order});
   return listSurveyBank(actor, body);
 }
 
 export async function deleteSurveyQuestion(actor, body) {
   assertBankManager(actor);
   const version = await currentSurveyVersion(body.p_slug);
-  const question = await queryOne(
-    `SELECT q.* FROM survey_questions q
-     JOIN survey_sections s ON s.id = q.section_id
-     WHERE s.version_id = :versionId AND q.code = :code`,
-    {versionId: version.id, code: String(body.p_code || '').toUpperCase()},
-  );
+  const code = String(body.p_code || '').toUpperCase();
+  const question = (await questionsInVersion(version.id)).find((item) => item.code === code);
   if (!question) throw new ApiError(404, 'question_missing');
-  const used = await queryOne(
-    'SELECT id FROM survey_answers WHERE question_id = :id LIMIT 1',
-    {id: question.id},
-  );
+  const used = await findOne('survey_answers', {question_id: question.id});
   if (used) {
-    await query('UPDATE survey_questions SET is_active = 0 WHERE id = :id', {
-      id: question.id,
-    });
+    await updateOne('survey_questions', {id: question.id}, {is_active: false});
   } else {
-    await query('DELETE FROM survey_options WHERE question_id = :id', {id: question.id});
-    await query('DELETE FROM survey_questions WHERE id = :id', {id: question.id});
+    await deleteMany('survey_options', {question_id: question.id});
+    await deleteMany('survey_questions', {id: question.id});
   }
   return {ok: true};
 }

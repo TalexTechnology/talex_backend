@@ -1,4 +1,4 @@
-const BOOLEAN_COLUMNS = new Set([
+export const BOOLEAN_COLUMNS = new Set([
   'is_active',
   'is_superadmin',
   'is_current',
@@ -40,7 +40,11 @@ export function publicRow(row) {
   if (!row || typeof row !== 'object') return row;
   const copy = {};
   for (const [key, value] of Object.entries(row)) {
-    if (HIDDEN_COLUMNS.has(key)) continue;
+    if (key === '_id' || HIDDEN_COLUMNS.has(key)) continue;
+    if (value instanceof Date) {
+      copy[key] = value.toISOString();
+      continue;
+    }
     if (BOOLEAN_COLUMNS.has(key)) {
       copy[key] = value === true || value === 1 || value === '1';
       continue;
@@ -55,10 +59,13 @@ export function publicRow(row) {
 }
 
 export function encodeWriteValue(column, value) {
-  if (JSON_COLUMNS.has(column) && value != null && typeof value !== 'string') {
-    return JSON.stringify(value);
-  }
-  if (BOOLEAN_COLUMNS.has(column)) return value ? 1 : 0;
+  if (JSON_COLUMNS.has(column) && typeof value === 'string') return parseJson(value);
+  if (BOOLEAN_COLUMNS.has(column)) return value === true || value === 1 || value === '1';
+  return value;
+}
+
+export function coerceFilterValue(column, value) {
+  if (BOOLEAN_COLUMNS.has(column)) return value === true || value === 1 || value === '1' || value === 'true';
   return value;
 }
 

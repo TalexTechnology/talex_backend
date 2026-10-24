@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
-import {query, queryOne} from '../db.js';
+import {deleteMany, findMany, findOne, insertOne, updateMany} from '../domain/store.js';
 import {ApiError} from '../http.js';
-import {assertIdentifier, encodeWriteValue, publicRow} from '../domain/rows.js';
+import {assertIdentifier, coerceFilterValue, encodeWriteValue, publicRow} from '../domain/rows.js';
 import {canWriteOrg} from '../domain/tenancy.js';
 
 const ALLOWED_TABLES = new Set([
@@ -92,15 +92,13 @@ function parseSelect(spec) {
   return {columns: columns.length ? columns : ['*'], embeds};
 }
 
-function whereSql(filters) {
-  if (!filters.length) return {sql: '', params: {}};
-  const params = Object.fromEntries(
-    filters.map((item, index) => [`f${index}`, item.value]),
-  );
-  const sql = `WHERE ${filters
-    .map((item, index) => `\`${assertIdentifier(item.column)}\` = :f${index}`)
-    .join(' AND ')}`;
-  return {sql, params};
+function mongoFilter(filters) {
+  const filter = {};
+  for (const item of filters) {
+    const column = assertIdentifier(item.column);
+    filter[column] = coerceFilterValue(column, item.value);
+  }
+  return filter;
 }
 
 async function attachEmbeds(table, rows, spec) {
@@ -114,9 +112,10 @@ async function attachEmbeds(table, rows, spec) {
     for (const embed of parsed.embeds) {
       const relation = EMBEDS[table]?.[embed.name];
       if (!relation) continue;
-      const children = await query(
-        `SELECT * FROM \`${relation.table}\` WHERE \`${relation.foreign}\` = :id LIMIT 50`,
-        {id: row[relation.local]},
+      const children = await findMany(
+        relation.table,
+        {[relation.foreign]: row[relation.local]},
+        {limit: 50},
       );
       const nested = await attachEmbeds(relation.table, children, embed.spec);
       next[embed.name] = relation.many ? nested : nested[0] ?? null;
@@ -200,19 +199,14 @@ export async function handleTable(method, table, url, actor, body) {
   assertTable(table);
   const request = parseRequest(url);
   const filters = scopedFilters(table, actor, request.filters);
-  const {sql, params} = whereSql(filters);
-  const order = request.order
-    ? `ORDER BY \`${assertIdentifier(request.order.column)}\` ${
-        request.order.ascending ? 'ASC' : 'DESC'
-      }`
-    : '';
+  const filter = mongoFilter(filters);
+  const sort = request.order
+    ? {[assertIdentifier(request.order.column)]: request.order.ascending ? 1 : -1}
+    : undefined;
   const limit = Math.min(Math.max(request.limit, 1), 500);
 
   if (method === 'GET') {
-    const rows = await query(
-      `SELECT * FROM \`${table}\` ${sql} ${order} LIMIT ${limit}`,
-      params,
-    );
+    const rows = await findMany(table, filter, {sort, limit});
     return attachEmbeds(table, rows, request.columns);
   }
 
@@ -222,45 +216,34 @@ export async function handleTable(method, table, url, actor, body) {
       payload.firebase_id = payload.id;
     }
     assertWrite(actor, table, payload, filters);
-    const columns = Object.keys(payload);
-    const values = Object.fromEntries(
-      columns.map((column) => [column, encodeWriteValue(column, payload[column])]),
-    );
-    await query(
-      `INSERT INTO \`${table}\` (${columns.map((column) => `\`${assertIdentifier(column)}\``).join(',')})
-       VALUES (${columns.map((column) => `:${column}`).join(',')})`,
-      values,
-    );
-    const row = await queryOne(`SELECT * FROM \`${table}\` WHERE id = :id`, {
-      id: payload.id,
-    });
+    const doc = {created_at: new Date()};
+    for (const [column, value] of Object.entries(payload)) {
+      assertIdentifier(column);
+      doc[column] = encodeWriteValue(column, value);
+    }
+    doc.updated_at = new Date();
+    await insertOne(table, doc);
+    const row = await findOne(table, {id: payload.id});
     return attachEmbeds(table, [row], request.columns);
   }
 
   if (method === 'PATCH') {
     if (!filters.length) throw new ApiError(400, 'missing_filter');
     assertWrite(actor, table, body, filters);
-    const assignments = Object.keys(body).map(
-      (column) => `\`${assertIdentifier(column)}\` = :${column}`,
-    );
-    const values = Object.fromEntries(
-      Object.entries(body).map(([column, value]) => [
-        column,
-        encodeWriteValue(column, value),
-      ]),
-    );
-    await query(`UPDATE \`${table}\` SET ${assignments.join(', ')} ${sql}`, {
-      ...values,
-      ...params,
-    });
-    const rows = await query(`SELECT * FROM \`${table}\` ${sql} LIMIT 20`, params);
+    const set = {updated_at: new Date()};
+    for (const [column, value] of Object.entries(body)) {
+      assertIdentifier(column);
+      set[column] = encodeWriteValue(column, value);
+    }
+    await updateMany(table, filter, set);
+    const rows = await findMany(table, filter, {limit: 20});
     return attachEmbeds(table, rows, request.columns);
   }
 
   if (method === 'DELETE') {
     if (!filters.length) throw new ApiError(400, 'missing_filter');
     assertWrite(actor, table, {}, filters);
-    await query(`DELETE FROM \`${table}\` ${sql}`, params);
+    await deleteMany(table, filter);
     return [];
   }
 
