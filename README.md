@@ -35,12 +35,14 @@ El handler serverless está en `api/index.js`. Todas las rutas se reescriben ah�
 2. En **Settings → Environment Variables** carga las mismas claves de `.env.example` (nunca el archivo `.env`).
 3. En cPanel → **Remote MySQL** agrega `%`. Las funciones de Vercel cambian de IP.
 4. `FIREBASE_SERVICE_ACCOUNT` es el JSON de la service account de Firebase, en una sola línea.
-5. Health check: `https://TU-PROYECTO.vercel.app/health` debe devolver `{"ok":true,"database":"mysql"}`.
+5. Health check: `https://talex-backend.vercel.app/health` debe devolver `{"ok":true,"database":"mysql"}`.
+
+Producción actual: https://talex-backend.vercel.app
 
 Flutter en producción:
 
 ```text
---dart-define=TALEX_API_URL=https://TU-PROYECTO.vercel.app
+--dart-define=TALEX_API_URL=https://talex-backend.vercel.app
 ```
 
 ## Superadmin
