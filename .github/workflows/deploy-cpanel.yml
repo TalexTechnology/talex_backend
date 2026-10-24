@@ -29,11 +29,12 @@ jobs:
           set -euo pipefail
           git config user.email "deploy@talex.com.co"
           git config user.name "TaleX deploy"
-          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" != "closed" ]; then
-            git push origin "HEAD:cpanel-live" --force
-            echo "La API de cPanel queda con el pull request #${{ github.event.pull_request.number }}."
-          else
+          if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" = "closed" ]; then
             git fetch origin develop
-            git push origin "origin/develop:cpanel-live" --force
-            echo "La API de cPanel queda con develop."
+            SHA="$(git rev-parse FETCH_HEAD)"
+            echo "La API de cPanel vuelve a develop."
+          else
+            SHA="${{ github.sha }}"
+            echo "La API de cPanel queda en ${SHA}."
           fi
+          git push origin "${SHA}:refs/heads/cpanel-live" --force
