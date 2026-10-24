@@ -33,9 +33,9 @@ La API corre en el mismo servidor que MySQL. `MYSQL_HOST` es `127.0.0.1`. No hac
 
 La rama que el servidor ejecuta se llama `cpanel-live`. GitHub Actions la actualiza así:
 
-- Un push a `develop` publica `develop`.
-- Un pull request hacia `develop` publica ese pull request.
-- Al cerrar el pull request sin merge, la API vuelve a `develop`.
+- Un push a `main` publica `main`.
+- Un pull request hacia `main` publica ese pull request.
+- Al cerrar el pull request sin merge, la API vuelve a `main`.
 
 cPanel tiene que seguir la rama `cpanel-live` y ejecutar `.cpanel.yml` en cada pull. Ese script copia el código a `~/talex-backend`, instala dependencias con el Node de cPanel y reinicia la app.
 

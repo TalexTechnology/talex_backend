@@ -2,9 +2,9 @@ name: Deploy backend → cPanel
 
 on:
   push:
-    branches: [develop]
+    branches: [main]
   pull_request:
-    branches: [develop]
+    branches: [main]
     types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
 
@@ -30,9 +30,9 @@ jobs:
           git config user.email "deploy@talex.com.co"
           git config user.name "TaleX deploy"
           if [ "${{ github.event_name }}" = "pull_request" ] && [ "${{ github.event.action }}" = "closed" ]; then
-            git fetch origin develop
+            git fetch origin main
             SHA="$(git rev-parse FETCH_HEAD)"
-            echo "La API de cPanel vuelve a develop."
+            echo "La API de cPanel vuelve a main."
           else
             SHA="${{ github.sha }}"
             echo "La API de cPanel queda en ${SHA}."
