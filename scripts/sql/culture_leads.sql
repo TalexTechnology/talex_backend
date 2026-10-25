@@ -1,0 +1,25 @@
+-- Leads del diagnóstico público /micultura. Posibles clientes.
+CREATE TABLE IF NOT EXISTS culture_leads (
+  id CHAR(36) PRIMARY KEY,
+  company_name VARCHAR(120) NOT NULL,
+  employee_range VARCHAR(32) NOT NULL,
+  perceived_culture JSON NOT NULL,
+  culture_comment VARCHAR(280) NULL,
+  email VARCHAR(255) NOT NULL,
+  consent_terms TINYINT(1) NOT NULL DEFAULT 0,
+  consent_data TINYINT(1) NOT NULL DEFAULT 0,
+  consent_payload JSON NULL,
+  utm_source VARCHAR(160) NULL,
+  utm_medium VARCHAR(160) NULL,
+  utm_campaign VARCHAR(160) NULL,
+  referrer VARCHAR(500) NULL,
+  source_url VARCHAR(500) NULL,
+  user_agent VARCHAR(500) NULL,
+  source VARCHAR(64) NOT NULL DEFAULT 'mi-cultura',
+  status VARCHAR(32) NOT NULL DEFAULT 'new',
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  KEY culture_leads_email (email),
+  KEY culture_leads_created_at (created_at),
+  KEY culture_leads_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

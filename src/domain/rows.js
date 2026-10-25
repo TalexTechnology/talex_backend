@@ -11,6 +11,8 @@ export const BOOLEAN_COLUMNS = new Set([
   'result_requested',
   'recurring',
   'creates_membership',
+  'consent_terms',
+  'consent_data',
 ]);
 
 const JSON_COLUMNS = new Set([
@@ -23,6 +25,8 @@ const JSON_COLUMNS = new Set([
   'conversation_topics',
   'data_gaps',
   'metadata',
+  'perceived_culture',
+  'consent_payload',
 ]);
 
 const HIDDEN_COLUMNS = new Set(['pin_hash', 'token_hash']);

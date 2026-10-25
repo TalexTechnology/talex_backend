@@ -30,6 +30,8 @@ const ALLOWED_TABLES = new Set([
   'audit_logs',
   'deals',
   'sales',
+  'culture_leads',
+  'culture_reports',
 ]);
 
 const EMBEDS = {
@@ -197,6 +199,9 @@ function assertWrite(actor, table, payload, filters) {
 
 export async function handleTable(method, table, url, actor, body) {
   assertTable(table);
+  if ((table === 'culture_leads' || table === 'culture_reports') && !actor.isSuperadmin) {
+    throw new ApiError(403, 'permission_denied');
+  }
   const request = parseRequest(url);
   const filters = scopedFilters(table, actor, request.filters);
   const filter = mongoFilter(filters);
