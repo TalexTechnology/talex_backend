@@ -219,6 +219,7 @@ export async function createCultureLead(body, {baseUrl} = {}) {
       const mail = cultureShareEmail({
         companyName: lead.companyName,
         contactName: lead.contactName,
+        employeeRange: lead.employeeRange,
         surveyUrl,
       });
       await sendMail({to: lead.email, ...mail});
