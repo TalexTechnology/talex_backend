@@ -16,6 +16,15 @@ import {
 } from '../domain/store.js';
 import {upsertProfile} from '../services/session.js';
 import {cultureLeadsByOrganization} from './leads.js';
+import {
+  createCultureQuestion,
+  deleteCultureQuestion,
+  getCultureQuestion,
+  listCultureQuestions,
+  reorderCultureQuestions,
+  updateCultureQuestion,
+  updateCultureSurvey,
+} from './culture-questions.js';
 import {publicRow} from '../domain/rows.js';
 import {
   activeMembership,
@@ -870,6 +879,13 @@ const handlers = {
   sync_identity_workspace: syncIdentityWorkspace,
   organization_survey_culture: organizationSurveyCulture,
   culture_leads_by_organization: cultureLeadsByOrganization,
+  list_culture_questions: listCultureQuestions,
+  get_culture_question: getCultureQuestion,
+  create_culture_question: createCultureQuestion,
+  update_culture_question: updateCultureQuestion,
+  delete_culture_question: deleteCultureQuestion,
+  reorder_culture_questions: reorderCultureQuestions,
+  update_culture_survey: updateCultureSurvey,
   save_organization_profile: saveOrganizationProfile,
   provision_organization: provisionOrganization,
   activate_invite_pin: activateInvitePin,

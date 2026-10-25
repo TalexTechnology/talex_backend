@@ -50,6 +50,14 @@
     {
       "key": "surveySlug",
       "value": "culture-perception"
+    },
+    {
+      "key": "cultureBank",
+      "value": "employee-culture-v1"
+    },
+    {
+      "key": "questionCode",
+      "value": "C01"
     }
   ],
   "item": [
@@ -445,6 +453,243 @@
               }
             },
             "description": "Resumen de las encuestas de percepción de cultura completadas de una empresa."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Preguntas Mi Cultura (company_culture_questions)",
+      "description": "CRUD del banco de preguntas de la encuesta de cultura para empleados. Leer: cualquier usuario logueado. Crear/editar/borrar/reordenar: solo superadmin. p_bank es opcional (por defecto employee-culture-v1).\n\nFormatos: most_least, value_coherence, pick_yes_no, text, single.\noptions_source: static, declared_values, organization_areas.",
+      "item": [
+        {
+          "name": "list_culture_questions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/list_culture_questions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "list_culture_questions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_bank\": \"{{cultureBank}}\",\n  \"p_include_inactive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Lista las preguntas activas ordenadas por sort_order, más la cabecera de la encuesta (survey). p_include_inactive: true para ver también las desactivadas."
+          }
+        },
+        {
+          "name": "get_culture_question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/get_culture_question",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "get_culture_question"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_bank\": \"{{cultureBank}}\",\n  \"p_code\": \"{{questionCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Una pregunta por código."
+          }
+        },
+        {
+          "name": "create_culture_question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/create_culture_question",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "create_culture_question"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_bank\": \"{{cultureBank}}\",\n  \"p_question\": {\n    \"code\": \"C09\",\n    \"name\": \"La celebración\",\n    \"format\": \"most_least\",\n    \"options_source\": \"static\",\n    \"statement\": \"Cuando el equipo logra algo importante, ¿cómo se celebra normalmente?\",\n    \"instruction\": \"Marque la opción MÁS probable y la MENOS probable.\",\n    \"section\": \"cultura\",\n    \"section_title\": \"1 · Cultura\",\n    \"technique\": \"Lo que haría la mayoría\",\n    \"scoring\": \"Más probable +1, menos probable −1, resto 0.\",\n    \"ask_forecast\": false,\n    \"required\": true,\n    \"is_active\": true,\n    \"options\": [\n      {\n        \"id\": \"innovacion\",\n        \"label\": \"Se comparte lo aprendido y se propone el siguiente reto\",\n        \"dimension\": \"Innovación y riesgo\"\n      },\n      {\n        \"id\": \"equipo\",\n        \"label\": \"Se hace algo juntos como equipo\",\n        \"dimension\": \"Trabajo en equipo\"\n      },\n      {\n        \"id\": \"resultados\",\n        \"label\": \"Se anuncia el número logrado\",\n        \"dimension\": \"Orientación a resultados\"\n      }\n    ]\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea una pregunta. code es obligatorio y único en el banco. Si no mandas sort_order queda de última."
+          }
+        },
+        {
+          "name": "update_culture_question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/update_culture_question",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "update_culture_question"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_bank\": \"{{cultureBank}}\",\n  \"p_code\": \"{{questionCode}}\",\n  \"p_question\": {\n    \"statement\": \"Texto nuevo de la pregunta\",\n    \"is_active\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Edita una pregunta. Solo se cambian los campos que mandes en p_question. Para cambiar el código manda p_question.code. Para desactivar sin borrar: is_active false."
+          }
+        },
+        {
+          "name": "delete_culture_question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/delete_culture_question",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "delete_culture_question"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_bank\": \"{{cultureBank}}\",\n  \"p_code\": \"C09\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Borra la pregunta definitivamente. Si solo quieres ocultarla usa update con is_active false."
+          }
+        },
+        {
+          "name": "reorder_culture_questions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/reorder_culture_questions",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "reorder_culture_questions"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_bank\": \"{{cultureBank}}\",\n  \"p_codes\": [\n    \"C01\",\n    \"C02\",\n    \"C03\",\n    \"C04\",\n    \"C05\",\n    \"C06\",\n    \"C07\",\n    \"C08\",\n    \"D01\",\n    \"O01\",\n    \"A01\",\n    \"K01\",\n    \"K02\",\n    \"K03\",\n    \"K04\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Define el orden. Hay que mandar TODOS los códigos del banco; quedan con sort_order 1..n."
+          }
+        },
+        {
+          "name": "update_culture_survey",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/update_culture_survey",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "update_culture_survey"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_bank\": \"{{cultureBank}}\",\n  \"p_title\": \"Encuesta de cultura para empleados\",\n  \"p_intro\": \"Responda con calma…\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Edita el título y la intro de la encuesta (documento _survey)."
           }
         }
       ]

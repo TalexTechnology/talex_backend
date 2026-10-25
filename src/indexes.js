@@ -68,6 +68,10 @@ const INDEXES = {
   ],
   firebase_id_map: [[{collection_name: 1, firebase_id: 1}, {unique: true}]],
   culture_reports: [[{organization_id: 1}, {unique: true}]],
+  company_culture_questions: [
+    [{bank: 1, code: 1}, {unique: true}],
+    [{bank: 1, is_active: 1, sort_order: 1}],
+  ],
   culture_leads: [
     [{email: 1, created_at: -1}],
     [{status: 1, created_at: -1}],
