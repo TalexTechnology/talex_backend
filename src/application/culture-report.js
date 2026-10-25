@@ -3,18 +3,7 @@ import {count, findMany, findOne, insertOne, updateOne} from '../domain/store.js
 import {config} from '../config.js';
 import {cultureReportReadyEmail, sendMail, smtpReady} from '../mail.js';
 import {cultureReportPageHtml} from './culture-report-page.js';
-
-const RANGE_RULES = [
-  {range: '1 – 50', estimate: 25, threshold: 0.35, minimum: 8},
-  {range: '51 – 200', estimate: 125, threshold: 0.25, minimum: 20},
-  {range: '201 – 1.000', estimate: 500, threshold: 0.2, minimum: 40},
-  {range: '1.001 – 5.000', estimate: 2500, threshold: 0.15, minimum: 80},
-  {range: 'Más de 5.000', estimate: 6000, threshold: 0.1, minimum: 100},
-  {range: '1 – 10', estimate: 6, threshold: 0.5, minimum: 3},
-  {range: '11 – 50', estimate: 30, threshold: 0.35, minimum: 8},
-  {range: '201 – 500', estimate: 350, threshold: 0.2, minimum: 40},
-  {range: 'Más de 500', estimate: 600, threshold: 0.15, minimum: 60},
-];
+import {participationFor} from './culture-participation.js';
 
 const SECTION_OUTLINE = [
   {code: 'cultura', title: 'Cultura vivida'},
@@ -24,30 +13,26 @@ const SECTION_OUTLINE = [
   {code: 'apertura', title: 'Comentarios del equipo'},
 ];
 
-function normalizeRange(value) {
-  return String(value || '')
-    .trim()
-    .replace(/\s*[-–—]\s*/g, ' – ')
-    .replace(/\s+/g, ' ');
-}
-
 export function ruleForRange(employeeRange) {
-  const key = normalizeRange(employeeRange);
-  return RANGE_RULES.find((item) => item.range === key) || RANGE_RULES[0];
+  return participationFor(employeeRange);
 }
 
 export function coverageFromCounts({respondents, employeeRange}) {
-  const rule = ruleForRange(employeeRange);
+  const rule = participationFor(employeeRange);
   const override = config.cultureReportThreshold;
-  const threshold = override > 0 && override <= 1 ? override : rule.threshold;
-  const needed = Math.max(rule.minimum, Math.ceil(rule.estimate * threshold));
+  const needed =
+    override > 0 && override <= 1
+      ? Math.max(rule.minimum, Math.ceil(rule.estimate * override))
+      : rule.needed;
   const percent = rule.estimate ? respondents / rule.estimate : 0;
   return {
     employeeRange: rule.range,
     estimatedHeadcount: rule.estimate,
     respondents,
     percent: Math.round(percent * 1000) / 10,
-    thresholdPercent: Math.round(threshold * 1000) / 10,
+    thresholdPercent: rule.estimate
+      ? Math.round((needed / rule.estimate) * 1000) / 10
+      : 0,
     needed,
     reached: respondents >= needed,
   };

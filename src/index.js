@@ -91,7 +91,9 @@ export async function handleRequest(request, response) {
     }
     throw new ApiError(404, 'not_found');
   } catch (error) {
-    console.error(request.method, request.url, error.code || error.name, error.message);
+    const status = error.status || 500;
+    const log = status >= 500 ? console.error : console.info;
+    log(request.method, request.url, error.code || error.name, error.message);
     const payload = {
       code: error.code || 'unexpected',
       message: error.message,

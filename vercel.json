@@ -1,5 +1,10 @@
 {
   "framework": null,
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "src/assets/**"
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",

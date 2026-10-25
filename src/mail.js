@@ -1,5 +1,39 @@
+import {readFileSync} from 'node:fs';
+import {dirname, join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import nodemailer from 'nodemailer';
 import {config} from './config.js';
+import {participationFor} from './application/culture-participation.js';
+
+const LOGO_CID = 'talex-logo-oscuro';
+const LOGO_URL = 'https://www.talex.com.co/talex_logo_horizontal_fondo_oscuro.png';
+const LOGO_FILENAME = 'talex_logo_horizontal_fondo_oscuro.png';
+
+function logoAttachment() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(here, 'assets', LOGO_FILENAME),
+    join(process.cwd(), 'src', 'assets', LOGO_FILENAME),
+  ];
+  for (const filename of candidates) {
+    try {
+      return {
+        filename: LOGO_FILENAME,
+        content: readFileSync(filename),
+        cid: LOGO_CID,
+        contentType: 'image/png',
+      };
+    } catch {
+      // El correo puede usar la URL pública si el archivo no viaja en el deploy.
+    }
+  }
+  return null;
+}
+
+function logoMarkup(attachment) {
+  const src = attachment ? `cid:${LOGO_CID}` : LOGO_URL;
+  return `<img src="${src}" alt="TaleX" width="144" height="48" style="display:block;border:0;outline:none;text-decoration:none;width:144px;height:48px;">`;
+}
 
 function createTransport(port) {
   return nodemailer.createTransport({
@@ -20,7 +54,7 @@ export function smtpReady() {
   return Boolean(config.smtp.host && config.smtp.user && config.smtp.pass);
 }
 
-export async function sendMail({to, subject, text, html}) {
+export async function sendMail({to, subject, text, html, attachments}) {
   if (!smtpReady()) {
     const error = new Error('smtp_unconfigured');
     error.status = 503;
@@ -40,6 +74,7 @@ export async function sendMail({to, subject, text, html}) {
         subject,
         text,
         html,
+        attachments,
       });
       return;
     } catch (error) {
@@ -48,68 +83,6 @@ export async function sendMail({to, subject, text, html}) {
     }
   }
   throw lastError || new Error('smtp_failed');
-}
-
-function participationFor(employeeRange) {
-  const range = String(employeeRange || '').trim();
-  const rules = {
-    '1 – 50': {
-      title: 'Para una empresa de 1 a 50 personas',
-      needed:
-        'Si son hasta 20 personas, necesitamos que responda todo el equipo. Si se acercan a 50, al menos 45 respuestas (90 % – 100 %).',
-      tip: 'Invita a todos.',
-    },
-    '51 – 200': {
-      title: 'Para una empresa de 51 a 200 personas',
-      needed: 'Necesitamos entre 46 y 132 respuestas (90 % – 66 % de tu equipo).',
-      tip: 'Apunta al menos al 70 %.',
-    },
-    '201 – 1.000': {
-      title: 'Para una empresa de 201 a 1.000 personas',
-      needed: 'Necesitamos entre 133 y 278 respuestas (66 % – 28 % de tu equipo).',
-      tip: 'Apunta al menos al 40 %.',
-    },
-    '1.001 – 5.000': {
-      title: 'Para una empresa de 1.001 a 5.000 personas',
-      needed: 'Necesitamos entre 278 y 357 respuestas (28 % – 7 % de tu equipo).',
-      tip: 'Apunta al menos a 360 respuestas.',
-    },
-    'Más de 5.000': {
-      title: 'Para una empresa de más de 5.000 personas',
-      needed: 'Necesitamos entre 357 y 384 respuestas (7 % o menos de tu equipo).',
-      tip: 'Apunta al menos a 385 respuestas.',
-    },
-    '1 – 10': {
-      title: 'Para una empresa de 1 a 10 personas',
-      needed: 'Necesitamos que responda todo el equipo.',
-      tip: 'Invita a todos.',
-    },
-    '11 – 50': {
-      title: 'Para una empresa de 11 a 50 personas',
-      needed:
-        'Si son cerca de 20, necesitamos que responda casi todo el equipo. Si se acercan a 50, al menos 45 respuestas.',
-      tip: 'Invita a todos.',
-    },
-    '201 – 500': {
-      title: 'Para una empresa de 201 a 500 personas',
-      needed: 'Necesitamos entre 133 y 278 respuestas.',
-      tip: 'Apunta al menos al 40 %.',
-    },
-    'Más de 500': {
-      title: 'Para una empresa de más de 500 personas',
-      needed: 'Según el tamaño, necesitamos entre 133 y 384 respuestas.',
-      tip: 'Si son más de 5.000, apunta al menos a 385 respuestas.',
-    },
-  };
-
-  return (
-    rules[range] || {
-      title: 'Para tu empresa',
-      needed:
-        'Necesitamos alcanzar el porcentaje mínimo de participación de tu equipo para elaborar el informe.',
-      tip: 'Invita a la mayor parte de las personas que viven el día a día.',
-    }
-  );
 }
 
 export function cultureShareEmail({
@@ -128,6 +101,7 @@ export function cultureShareEmail({
 
   const safeUrl = escapeHtml(url.href);
   const participation = participationFor(employeeRange);
+  const logo = logoAttachment();
 
   const subject = company
     ? `${company}: descubre la cultura que vive tu equipo`
@@ -156,7 +130,7 @@ export function cultureShareEmail({
     '',
     '2. Pide a cada persona que complete la encuesta de forma individual, pensando en lo que vive en su día a día: cómo toman decisiones, colaboran y se relacionan.',
     '',
-    `3. Alcancen el mínimo de participación. ${participation.title}: ${participation.needed} ${participation.tip}`,
+    `3. Alcancen el mínimo de participación. ${participation.title}. ${participation.neededText} ${participation.tip}`,
     '',
     'Tu informe estará disponible 24 horas después de alcanzar ese mínimo. El plazo comienza cuando se cumple, no cuando compartes el enlace.',
     '',
@@ -195,9 +169,9 @@ export function cultureShareEmail({
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:560px;">
 
           <tr>
-            <td bgcolor="#0b1528" style="padding:20px 24px;background-color:#0b1528;border-radius:12px 12px 0 0;border-bottom:3px solid #a4e765;">
-              <a href="https://talex.com.co" style="font-family:Arial,Helvetica,sans-serif;font-size:28px;font-weight:800;letter-spacing:-1px;color:#ffffff;text-decoration:none;">
-                Tale<span style="color:#a4e765;">X</span>
+            <td width="100%" align="left" bgcolor="#0b1528" style="padding:16px 24px;background-color:#0b1528;border-radius:12px 12px 0 0;border-bottom:3px solid #a4e765;">
+              <a href="https://talex.com.co" style="text-decoration:none;">
+                ${logoMarkup(logo)}
               </a>
             </td>
           </tr>
@@ -283,7 +257,7 @@ export function cultureShareEmail({
 
               <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#4b5563;">
                 <strong style="color:#254a78;">3. Alcancen el mínimo de participación.</strong><br>
-                ${escapeHtml(participation.title)}. ${escapeHtml(participation.needed)}
+                ${escapeHtml(participation.title)}. ${escapeHtml(participation.neededText)}
               </p>
 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background-color:#f3f6fa;border-left:4px solid #a4e765;">
@@ -361,7 +335,7 @@ export function cultureShareEmail({
 </body>
 </html>`;
 
-  return {subject, text, html};
+  return {subject, text, html, attachments: logo ? [logo] : undefined};
 }
 
 export function cultureReportReadyEmail({companyName, contactName, reportUrl, coverage}) {
