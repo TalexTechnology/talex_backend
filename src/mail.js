@@ -1,38 +1,11 @@
-import {readFileSync} from 'node:fs';
-import {dirname, join} from 'node:path';
-import {fileURLToPath} from 'node:url';
 import nodemailer from 'nodemailer';
 import {config} from './config.js';
 import {participationFor} from './application/culture-participation.js';
 
-const LOGO_CID = 'talex-logo-oscuro';
 const LOGO_URL = 'https://www.talex.com.co/talex_logo_horizontal_fondo_oscuro.png';
-const LOGO_FILENAME = 'talex_logo_horizontal_fondo_oscuro.png';
 
-function logoAttachment() {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const candidates = [
-    join(here, 'assets', LOGO_FILENAME),
-    join(process.cwd(), 'src', 'assets', LOGO_FILENAME),
-  ];
-  for (const filename of candidates) {
-    try {
-      return {
-        filename: LOGO_FILENAME,
-        content: readFileSync(filename),
-        cid: LOGO_CID,
-        contentType: 'image/png',
-      };
-    } catch {
-      // El correo puede usar la URL pública si el archivo no viaja en el deploy.
-    }
-  }
-  return null;
-}
-
-function logoMarkup(attachment) {
-  const src = attachment ? `cid:${LOGO_CID}` : LOGO_URL;
-  return `<img src="${src}" alt="TaleX" width="144" height="48" style="display:block;border:0;outline:none;text-decoration:none;width:144px;height:48px;">`;
+function logoMarkup() {
+  return `<img src="${LOGO_URL}" alt="TaleX" width="144" height="48" style="display:block;border:0;outline:none;text-decoration:none;width:144px;height:48px;">`;
 }
 
 function createTransport(port) {
@@ -101,7 +74,6 @@ export function cultureShareEmail({
 
   const safeUrl = escapeHtml(url.href);
   const participation = participationFor(employeeRange);
-  const logo = logoAttachment();
 
   const subject = company
     ? `${company}: descubre la cultura que vive tu equipo`
@@ -171,7 +143,7 @@ export function cultureShareEmail({
           <tr>
             <td width="100%" align="left" bgcolor="#0b1528" style="padding:16px 24px;background-color:#0b1528;border-radius:12px 12px 0 0;border-bottom:3px solid #a4e765;">
               <a href="https://talex.com.co" style="text-decoration:none;">
-                ${logoMarkup(logo)}
+                ${logoMarkup()}
               </a>
             </td>
           </tr>
@@ -335,7 +307,7 @@ export function cultureShareEmail({
 </body>
 </html>`;
 
-  return {subject, text, html, attachments: logo ? [logo] : undefined};
+  return {subject, text, html};
 }
 
 export function cultureReportReadyEmail({companyName, contactName, reportUrl, coverage}) {
