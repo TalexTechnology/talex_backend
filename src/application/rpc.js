@@ -15,6 +15,7 @@ import {
   upsertOne,
 } from '../domain/store.js';
 import {upsertProfile} from '../services/session.js';
+import {cultureLeadsByOrganization} from './leads.js';
 import {publicRow} from '../domain/rows.js';
 import {
   activeMembership,
@@ -852,6 +853,7 @@ const handlers = {
   current_session_profile: (actor) => currentSessionProfile(actor),
   sync_identity_workspace: syncIdentityWorkspace,
   organization_survey_culture: organizationSurveyCulture,
+  culture_leads_by_organization: cultureLeadsByOrganization,
   save_organization_profile: saveOrganizationProfile,
   provision_organization: provisionOrganization,
   activate_invite_pin: activateInvitePin,
