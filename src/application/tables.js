@@ -32,6 +32,7 @@ const ALLOWED_TABLES = new Set([
   'sales',
   'culture_leads',
   'culture_reports',
+  'company_culture_questions',
 ]);
 
 const EMBEDS = {

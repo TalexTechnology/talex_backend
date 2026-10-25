@@ -24,6 +24,14 @@ export async function handleRequest(request, response) {
       return;
     }
     const url = new URL(request.url, 'http://localhost');
+    if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/favicon.ico')) {
+      if (url.pathname === '/favicon.ico') {
+        json(response, 204, {});
+        return;
+      }
+      json(response, 200, {ok: true, service: 'talex-api', health: '/health'});
+      return;
+    }
     if (request.method === 'GET' && url.pathname === '/health') {
       await pingDatabase();
       json(response, 200, {ok: true, database: 'mongodb'});
@@ -67,19 +75,18 @@ export async function handleRequest(request, response) {
       throw new ApiError(405, 'method_not_allowed');
     }
 
-    const actor = await actorFrom(request);
     if (request.method === 'POST' && url.pathname.startsWith('/v1/rpc/')) {
       json(
         response,
         200,
-        await handleRpc(url.pathname.slice('/v1/rpc/'.length), actor, await readBody(request)),
+        await handleRpc(url.pathname.slice('/v1/rpc/'.length), await actorFrom(request), await readBody(request)),
       );
       return;
     }
     if (url.pathname.startsWith('/v1/data/')) {
       const table = url.pathname.slice('/v1/data/'.length);
       const body = request.method === 'GET' ? {} : await readBody(request);
-      json(response, 200, await handleTable(request.method, table, url, actor, body));
+      json(response, 200, await handleTable(request.method, table, url, await actorFrom(request), body));
       return;
     }
     throw new ApiError(404, 'not_found');
