@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "firebase-admin": "^13.4.0",
-    "mongodb": "^6.20.0"
+    "mongodb": "^6.21.0",
+    "nodemailer": "^6.10.1"
   }
 }

@@ -1,0 +1,1017 @@
+{
+  "info": {
+    "name": "TaleX API",
+    "description": "API de TaleX (talex_backend). Todas las rutas salvo /health piden Authorization: Bearer <Firebase ID token>.\n\n1. Llena las variables firebaseApiKey, email y password.\n2. Ejecuta \"Auth / Obtener token Firebase\": guarda {{token}} solo.\n3. El token dura 1 hora.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://talex-backend.vercel.app"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "firebaseApiKey",
+      "value": ""
+    },
+    {
+      "key": "email",
+      "value": "talex.admin@talex.com.co"
+    },
+    {
+      "key": "password",
+      "value": ""
+    },
+    {
+      "key": "organizationId",
+      "value": "77c243b3-720f-427c-9834-03ed440c1e24"
+    },
+    {
+      "key": "applicationId",
+      "value": ""
+    },
+    {
+      "key": "vacancyId",
+      "value": ""
+    },
+    {
+      "key": "surveySlug",
+      "value": "culture-perception"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Obtener token Firebase",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.idToken) {",
+                  "  pm.collectionVariables.set(\"token\", body.idToken);",
+                  "  console.log(\"token guardado\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={{firebaseApiKey}}",
+              "protocol": "https",
+              "host": [
+                "identitytoolkit",
+                "googleapis",
+                "com"
+              ],
+              "path": [
+                "v1",
+                "accounts:signInWithPassword"
+              ],
+              "query": [
+                {
+                  "key": "key",
+                  "value": "{{firebaseApiKey}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"returnSecureToken\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Login con correo y contraseña en Firebase. Guarda idToken en la variable {{token}}."
+          }
+        },
+        {
+          "name": "Health",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            },
+            "description": "Ping a MongoDB. No pide token."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sesión",
+      "item": [
+        {
+          "name": "current_session_profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/current_session_profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "current_session_profile"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Perfil del usuario logueado, su membresía activa y si es superadmin."
+          }
+        },
+        {
+          "name": "sync_identity_workspace",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/sync_identity_workspace",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "sync_identity_workspace"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_organization_id\": \"{{organizationId}}\",\n  \"p_organization_name\": \"Empresa Demo\",\n  \"p_role\": \"company_admin\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Sincroniza el usuario de Firebase con su empresa y rol."
+          }
+        },
+        {
+          "name": "activate_invite_pin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/activate_invite_pin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "activate_invite_pin"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_pin\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Activa una invitación con el PIN recibido."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Empresas",
+      "item": [
+        {
+          "name": "provision_organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/provision_organization",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "provision_organization"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_name\": \"Empresa Demo\",\n  \"p_nit\": \"900123456-7\",\n  \"p_sector\": \"Tecnología\",\n  \"p_size\": \"11 – 50\",\n  \"p_country\": \"Colombia\",\n  \"p_region\": \"Antioquia\",\n  \"p_city\": \"Medellín\",\n  \"p_website\": \"https://empresa.com\",\n  \"p_logo_url\": null,\n  \"p_description\": \"Descripción de la empresa\",\n  \"p_values\": [\n    \"Transparencia\",\n    \"Colaboración\"\n  ],\n  \"p_culture\": [\n    \"Innovadora\",\n    \"Flexible\"\n  ],\n  \"p_standout\": [\n    \"Proactividad\"\n  ],\n  \"p_sought\": \"Personas autónomas y curiosas\",\n  \"p_recruiter_email\": \"reclutador@empresa.com\",\n  \"p_recruiter_first_name\": \"Ana\",\n  \"p_recruiter_last_name\": \"Pérez\",\n  \"p_pin\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea una empresa y su reclutador. Solo superadmin."
+          }
+        },
+        {
+          "name": "save_organization_profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/save_organization_profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "save_organization_profile"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_organization_id\": \"{{organizationId}}\",\n  \"p_name\": \"Empresa Demo\",\n  \"p_nit\": \"900123456-7\",\n  \"p_sector\": \"Tecnología\",\n  \"p_size\": \"11 – 50\",\n  \"p_country\": \"Colombia\",\n  \"p_region\": \"Antioquia\",\n  \"p_city\": \"Medellín\",\n  \"p_website\": \"https://empresa.com\",\n  \"p_logo_url\": null,\n  \"p_description\": \"Descripción de la empresa\",\n  \"p_values\": [\n    \"Transparencia\",\n    \"Colaboración\"\n  ],\n  \"p_culture\": [\n    \"Innovadora\",\n    \"Flexible\"\n  ],\n  \"p_standout\": [\n    \"Proactividad\"\n  ],\n  \"p_sought\": \"Personas autónomas y curiosas\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Actualiza el perfil y el ADN cultural de la empresa."
+          }
+        },
+        {
+          "name": "create_staff_invite",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/create_staff_invite",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "create_staff_invite"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_organization_id\": \"{{organizationId}}\",\n  \"p_email\": \"nuevo@empresa.com\",\n  \"p_first_name\": \"Luis\",\n  \"p_last_name\": \"Gómez\",\n  \"p_role\": \"recruiter\",\n  \"p_pin\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Invita a un miembro del equipo a la empresa."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Cultura",
+      "item": [
+        {
+          "name": "culture_leads_by_organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/culture_leads_by_organization",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "culture_leads_by_organization"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Leads de culture_leads agrupados por empresa (organization_id). Body vacío = todas (solo superadmin). Un usuario de empresa solo ve la suya."
+          }
+        },
+        {
+          "name": "culture_leads_by_organization (una empresa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/culture_leads_by_organization",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "culture_leads_by_organization"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_organization_id\": \"{{organizationId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "organization_survey_culture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/organization_survey_culture",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "organization_survey_culture"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_organization_id\": \"{{organizationId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Resumen de las encuestas de percepción de cultura completadas de una empresa."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Candidatos y afinidad",
+      "item": [
+        {
+          "name": "create_respondent_application",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/create_respondent_application",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "create_respondent_application"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_organization_id\": \"{{organizationId}}\",\n  \"p_vacancy_id\": \"{{vacancyId}}\",\n  \"p_token\": \"\",\n  \"p_email\": \"candidato@correo.com\",\n  \"p_display_name\": \"Candidato Demo\",\n  \"p_document_number\": \"1234567890\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea la postulación de un candidato a una vacante."
+          }
+        },
+        {
+          "name": "save_affinity_answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/save_affinity_answer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "save_affinity_answer"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_application_id\": \"{{applicationId}}\",\n  \"p_question_code\": \"A01\",\n  \"p_value\": 4\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Guarda una respuesta de la prueba de afinidad."
+          }
+        },
+        {
+          "name": "complete_affinity_evaluation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/complete_affinity_evaluation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "complete_affinity_evaluation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_application_id\": \"{{applicationId}}\",\n  \"p_vacancy_affinity\": 82,\n  \"p_dimension_scores\": {\n    \"colaboracion\": 4.2,\n    \"innovacion\": 3.8\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Cierra la evaluación de afinidad del candidato."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Banco de preguntas (superadmin)",
+      "item": [
+        {
+          "name": "list_survey_bank",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/list_survey_bank",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "list_survey_bank"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_slug\": \"{{surveySlug}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Lista las preguntas. Slugs: culture-perception, affinity-core."
+          }
+        },
+        {
+          "name": "upsert_survey_question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/upsert_survey_question",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "upsert_survey_question"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_slug\": \"{{surveySlug}}\",\n  \"p_question\": {\n    \"code\": \"C01\",\n    \"section\": \"cultura\",\n    \"format\": \"pair\",\n    \"instruction\": \"Elige la opción que más se parece a tu empresa\",\n    \"statementA\": \"Se decide rápido\",\n    \"statementB\": \"Se analiza a fondo\",\n    \"dimensionA\": \"Ágil\",\n    \"dimensionB\": \"Analítica\",\n    \"options\": [],\n    \"order\": 1,\n    \"required\": true,\n    \"active\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Crea o actualiza una pregunta por código."
+          }
+        },
+        {
+          "name": "replace_survey_bank",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/replace_survey_bank",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "replace_survey_bank"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_slug\": \"{{surveySlug}}\",\n  \"p_questions\": [\n    {\n      \"code\": \"C01\",\n      \"section\": \"cultura\",\n      \"format\": \"pair\",\n      \"instruction\": \"Elige la opción que más se parece a tu empresa\",\n      \"statementA\": \"Se decide rápido\",\n      \"statementB\": \"Se analiza a fondo\",\n      \"dimensionA\": \"Ágil\",\n      \"dimensionB\": \"Analítica\",\n      \"options\": [],\n      \"order\": 1,\n      \"required\": true,\n      \"active\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Reemplaza el banco completo. Las preguntas que faltan se borran, o se desactivan si ya tienen respuestas."
+          }
+        },
+        {
+          "name": "set_survey_question_active",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/set_survey_question_active",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "set_survey_question_active"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_slug\": \"{{surveySlug}}\",\n  \"p_code\": \"C01\",\n  \"p_active\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Activa o desactiva una pregunta."
+          }
+        },
+        {
+          "name": "swap_survey_question_order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/swap_survey_question_order",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "swap_survey_question_order"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_slug\": \"{{surveySlug}}\",\n  \"p_code_a\": \"C01\",\n  \"p_code_b\": \"C02\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Intercambia el orden de dos preguntas."
+          }
+        },
+        {
+          "name": "delete_survey_question",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/rpc/delete_survey_question",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "rpc",
+                "delete_survey_question"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"p_slug\": \"{{surveySlug}}\",\n  \"p_code\": \"C01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Borra una pregunta."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Datos (tablas)",
+      "description": "GET/POST/PATCH/DELETE sobre /v1/data/:tabla. Filtros: eq.<columna>=valor. También: select, order=col.desc, limit (máx 500). Un usuario de empresa solo ve filas de su empresa. PATCH y DELETE exigen al menos un filtro.",
+      "item": [
+        {
+          "name": "Listar empresas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/organizations?order=created_at.desc&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "organizations"
+              ],
+              "query": [
+                {
+                  "key": "order",
+                  "value": "created_at.desc"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Empresa por id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/organizations?eq.id={{organizationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "organizations"
+              ],
+              "query": [
+                {
+                  "key": "eq.id",
+                  "value": "{{organizationId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Vacantes de la empresa",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/vacancies?eq.organization_id={{organizationId}}&order=created_at.desc",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "vacancies"
+              ],
+              "query": [
+                {
+                  "key": "eq.organization_id",
+                  "value": "{{organizationId}}"
+                },
+                {
+                  "key": "order",
+                  "value": "created_at.desc"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Postulaciones con persona",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/applications?eq.organization_id={{organizationId}}&select=*,persons(*)",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "applications"
+              ],
+              "query": [
+                {
+                  "key": "eq.organization_id",
+                  "value": "{{organizationId}}"
+                },
+                {
+                  "key": "select",
+                  "value": "*,persons(*)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Mi perfil con membresías y empresa",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/profiles?select=*,memberships(*,organizations(*))",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "profiles"
+              ],
+              "query": [
+                {
+                  "key": "select",
+                  "value": "*,memberships(*,organizations(*))"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Resultados de percepción de cultura",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/culture_perception_results?eq.organization_id={{organizationId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "culture_perception_results"
+              ],
+              "query": [
+                {
+                  "key": "eq.organization_id",
+                  "value": "{{organizationId}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Crear vacante",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/vacancies",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "vacancies"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"organization_id\": \"{{organizationId}}\",\n  \"title\": \"Desarrollador Backend\",\n  \"status\": \"open\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Actualizar vacante",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/vacancies?eq.id={{vacancyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "vacancies"
+              ],
+              "query": [
+                {
+                  "key": "eq.id",
+                  "value": "{{vacancyId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"closed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Borrar vacante",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/v1/data/vacancies?eq.id={{vacancyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "data",
+                "vacancies"
+              ],
+              "query": [
+                {
+                  "key": "eq.id",
+                  "value": "{{vacancyId}}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -682,18 +682,21 @@ async function ensureSection(versionId, code, title) {
 }
 
 async function questionPayload(question) {
-  const section = await findOne('survey_sections', {id: question.section_id});
+  const section = question.section_id
+    ? await findOne('survey_sections', {id: question.section_id})
+    : null;
   const options = await findMany(
     'survey_options',
     {question_id: question.id},
     {sort: {sort_order: 1, value_int: 1}, limit: 50},
   );
+  const sectionCode = section?.code || question.section || question.front || 'values';
   return {
     id: question.id,
     code: question.code,
-    front: section.code,
-    section: section.code,
-    sectionTitle: section.title,
+    front: sectionCode,
+    section: sectionCode,
+    sectionTitle: section?.title || sectionCode,
     format: question.format,
     instruction: question.instruction,
     statementA: question.statement_a,
@@ -718,10 +721,23 @@ async function questionsInVersion(versionId) {
   return questions;
 }
 
+async function questionsForSlug(slug) {
+  const version = await currentSurveyVersion(slug);
+  const direct = await questionsInVersion(version.id);
+  if (direct.length) return {version, questions: direct};
+  const codes = (await sectionsFor(version.id)).map((item) => item.code);
+  if (!codes.length) return {version, questions: []};
+  const sameCodeSections = await findMany('survey_sections', {code: {$in: codes}}, {limit: 200});
+  const questions = await findMany('survey_questions', {
+    section_id: {$in: sameCodeSections.map((item) => item.id)},
+  }, {limit: 2000});
+  questions.sort((a, b) => a.sort_order - b.sort_order || String(a.code).localeCompare(String(b.code)));
+  return {version, questions};
+}
+
 export async function listSurveyBank(actor, body) {
   assertBankManager(actor);
-  const version = await currentSurveyVersion(body.p_slug);
-  const questions = await questionsInVersion(version.id);
+  const {questions} = await questionsForSlug(body.p_slug);
   return Promise.all(questions.map(questionPayload));
 }
 

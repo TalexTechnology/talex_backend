@@ -37,4 +37,13 @@ export const config = {
     .filter(Boolean),
   mongodbUri: env('MONGODB_URI', ''),
   mongodbDatabase: env('MONGODB_DB', 'talex'),
+  publicSurveyBase: env('PUBLIC_SURVEY_BASE', 'https://platform.talex.com.co'),
+  cultureReportThreshold: Number(env('CULTURE_REPORT_THRESHOLD', '0')),
+  smtp: {
+    host: env('SMTP_HOST', ''),
+    user: env('SMTP_USER', ''),
+    pass: env('SMTP_PASS', ''),
+    from: env('SMTP_FROM', ''),
+    port: Number(env('SMTP_PORT', '587')),
+  },
 };

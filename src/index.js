@@ -1,10 +1,21 @@
 import http from 'node:http';
 import {config} from './config.js';
 import {pingDatabase} from './db.js';
-import {ApiError, json, readBody} from './http.js';
+import {ApiError, json, readBody, redirect} from './http.js';
 import {actorFrom} from './auth.js';
 import {handleRpc} from './application/rpc.js';
 import {handleTable} from './application/tables.js';
+import {createCultureLead} from './application/culture-leads.js';
+import {getCultureSurvey, submitCultureSurvey} from './application/culture-survey.js';
+import {getCultureReport} from './application/culture-report.js';
+
+function publicBase() {
+  const configured = String(config.publicSurveyBase || 'https://platform.talex.com.co').replace(/\/$/, '');
+  if (!configured || /api\.talex\.com\.co$/i.test(configured)) {
+    return 'https://platform.talex.com.co';
+  }
+  return configured;
+}
 
 export async function handleRequest(request, response) {
   try {
@@ -17,6 +28,43 @@ export async function handleRequest(request, response) {
       await pingDatabase();
       json(response, 200, {ok: true, database: 'mongodb'});
       return;
+    }
+    if (url.pathname === '/api/mi-cultura') {
+      if (request.method !== 'POST') throw new ApiError(405, 'method_not_allowed');
+      json(response, 200, await createCultureLead(await readBody(request), {baseUrl: publicBase()}));
+      return;
+    }
+    const culturePage = url.pathname.match(/^\/cultura\/([^/]+)(\/informe)?$/);
+    if (culturePage) {
+      if (request.method !== 'GET') throw new ApiError(405, 'method_not_allowed');
+      redirect(response, `${publicBase()}${url.pathname}`);
+      return;
+    }
+    const cultureReportApi = url.pathname.match(/^\/api\/cultura\/([^/]+)\/informe$/);
+    if (cultureReportApi) {
+      if (request.method !== 'GET') throw new ApiError(405, 'method_not_allowed');
+      const report = await getCultureReport(cultureReportApi[1]);
+      if (!report) throw new ApiError(404, 'company_not_found');
+      json(response, 200, report);
+      return;
+    }
+    const cultureApi = url.pathname.match(/^\/api\/cultura\/([^/]+)$/);
+    if (cultureApi) {
+      if (request.method === 'GET') {
+        json(response, 200, await getCultureSurvey(cultureApi[1]));
+        return;
+      }
+      if (request.method === 'POST') {
+        json(
+          response,
+          200,
+          await submitCultureSurvey(cultureApi[1], await readBody(request), {
+            baseUrl: publicBase(),
+          }),
+        );
+        return;
+      }
+      throw new ApiError(405, 'method_not_allowed');
     }
 
     const actor = await actorFrom(request);
@@ -37,10 +85,14 @@ export async function handleRequest(request, response) {
     throw new ApiError(404, 'not_found');
   } catch (error) {
     console.error(request.method, request.url, error.code || error.name, error.message);
-    json(response, error.status || 500, {
+    const payload = {
       code: error.code || 'unexpected',
       message: error.message,
-    });
+    };
+    if (String(request.url || '').includes('/api/mi-cultura')) {
+      payload.success = false;
+    }
+    json(response, error.status || 500, payload);
   }
 }
 

@@ -67,6 +67,13 @@ const INDEXES = {
     [{organization_id: 1, created_at: -1}],
   ],
   firebase_id_map: [[{collection_name: 1, firebase_id: 1}, {unique: true}]],
+  culture_reports: [[{organization_id: 1}, {unique: true}]],
+  culture_leads: [
+    [{email: 1, created_at: -1}],
+    [{status: 1, created_at: -1}],
+    [{organization_id: 1}],
+    [{created_at: -1}],
+  ],
 };
 
 export async function ensureIndexes(db) {

@@ -96,4 +96,36 @@ export async function ensureSeed(db) {
   for (const [id, version_id, code, title, sort_order] of SECTIONS) {
     await upsert(db, 'survey_sections', {id}, {id, version_id, code, title, sort_order});
   }
+  await repairMisplacedAffinityQuestions(db);
+}
+
+const AFFINITY_SECTION_CODES = ['values', 'needs', 'capabilities'];
+
+async function repairMisplacedAffinityQuestions(db) {
+  const affinityVersion = VERSIONS.find((item) => item.template_id === TEMPLATES[0].id);
+  if (!affinityVersion) return;
+  const affinitySections = await db
+    .collection('survey_sections')
+    .find({version_id: affinityVersion.id, code: {$in: AFFINITY_SECTION_CODES}})
+    .toArray();
+  const targetByCode = new Map(affinitySections.map((item) => [item.code, item]));
+  const straySections = await db
+    .collection('survey_sections')
+    .find({
+      version_id: {$ne: affinityVersion.id},
+      code: {$in: AFFINITY_SECTION_CODES},
+    })
+    .toArray();
+  for (const stray of straySections) {
+    const target = targetByCode.get(stray.code);
+    if (!target) continue;
+    await db.collection('survey_questions').updateMany(
+      {section_id: stray.id},
+      {$set: {section_id: target.id}},
+    );
+    const leftover = await db.collection('survey_questions').countDocuments({section_id: stray.id});
+    if (!leftover) {
+      await db.collection('survey_sections').deleteOne({id: stray.id});
+    }
+  }
 }
