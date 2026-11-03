@@ -2,6 +2,7 @@ import {ApiError} from '../http.js';
 import {count, findMany} from '../domain/store.js';
 import {publicRow} from '../domain/rows.js';
 import {assertSignedIn, resolveOrganizationId} from '../domain/tenancy.js';
+import {cultureTrackingByOrganization} from './culture-tracking.js';
 
 const MAX_LEADS = 5000;
 
@@ -12,7 +13,10 @@ const LEAD_FIELDS = [
   'contact_name',
   'email',
   'employee_range',
+  'employee_count',
+  'headcount_by_area',
   'perceived_culture',
+  'declared_values',
   'culture_comment',
   'status',
   'email_status',
@@ -101,11 +105,7 @@ export async function cultureLeadsByOrganization(actor, body) {
     {sort: {created_at: 1}, limit: MAX_LEADS},
   );
   const organizationIds = organizations.map((org) => org.id);
-  const sessions = await findMany('survey_sessions', {
-    organization_id: {$in: organizationIds},
-    purpose: 'culture_perception',
-    status: 'completed',
-  }, {limit: 50000});
+  const tracking = await cultureTrackingByOrganization(organizationIds);
 
   const leadsByOrg = new Map(organizationIds.map((id) => [id, []]));
   const unassigned = [];
@@ -114,10 +114,6 @@ export async function cultureLeadsByOrganization(actor, body) {
     const bucket = lead.organization_id && leadsByOrg.get(lead.organization_id);
     if (bucket) bucket.push(lead);
     else unassigned.push(lead);
-  }
-  const respondentsByOrg = new Map();
-  for (const session of sessions) {
-    respondentsByOrg.set(session.organization_id, (respondentsByOrg.get(session.organization_id) || 0) + 1);
   }
 
   const groups = organizations
@@ -131,11 +127,15 @@ export async function cultureLeadsByOrganization(actor, body) {
           name: value.name ?? null,
           status: value.status ?? null,
           size_label: value.size_label ?? null,
+          employee_count: value.employee_count ?? null,
+          headcount_by_area: value.headcount_by_area ?? null,
+          declared_values: value.declared_values ?? null,
           source: value.source ?? null,
           archived: Boolean(value.archived),
           created_at: value.created_at ?? null,
         },
-        surveyRespondents: respondentsByOrg.get(org.id) || 0,
+        surveyRespondents: tracking.get(org.id)?.completedResponses || 0,
+        tracking: tracking.get(org.id),
         summary: summarize(leads),
         leads,
       };

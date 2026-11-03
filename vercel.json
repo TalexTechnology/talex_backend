@@ -2,13 +2,20 @@
   "framework": null,
   "functions": {
     "api/index.js": {
-      "includeFiles": "src/assets/**"
+      "includeFiles": "src/assets/**",
+      "maxDuration": 30
     }
   },
   "rewrites": [
     {
       "source": "/(.*)",
       "destination": "/api"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/culture-reports",
+      "schedule": "0 12 * * *"
     }
   ]
 }

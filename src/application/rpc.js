@@ -16,6 +16,8 @@ import {
 } from '../domain/store.js';
 import {upsertProfile} from '../services/session.js';
 import {cultureLeadsByOrganization} from './leads.js';
+import {generateCultureReport} from './culture-report.js';
+import {publishCultureReportPdf} from './culture-report-send.js';
 import {
   createCultureQuestion,
   deleteCultureQuestion,
@@ -879,6 +881,9 @@ const handlers = {
   sync_identity_workspace: syncIdentityWorkspace,
   organization_survey_culture: organizationSurveyCulture,
   culture_leads_by_organization: cultureLeadsByOrganization,
+  generate_culture_report: generateCultureReport,
+  send_culture_report_pdf: (actor, body) =>
+    publishCultureReportPdf(actor, body, {baseUrl: 'https://api.talex.com.co'}),
   list_culture_questions: listCultureQuestions,
   get_culture_question: getCultureQuestion,
   create_culture_question: createCultureQuestion,

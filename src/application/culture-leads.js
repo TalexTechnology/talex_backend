@@ -4,6 +4,8 @@ import {ApiError} from '../http.js';
 import {publicRow} from '../domain/rows.js';
 import {randomToken, sha256Hex} from '../domain/crypto.js';
 import {cultureShareEmail, sendMail, smtpReady} from '../mail.js';
+import {DEFAULT_AREAS, mapLandingTraits, parseEmployeeCount, parsePlantilla} from '../domain/culture-model.js';
+import {createShareKey} from './culture-tracking.js';
 
 const EMPLOYEE_RANGES = new Set([
   '1 – 50',
@@ -76,14 +78,25 @@ function originOf(body) {
   };
 }
 
-function normalizeLead(body) {
+export function normalizeLead(body) {
   const companyName = text(body.nombreEmpresa ?? body.company_name ?? body.empresa, 120);
   const contactName = text(
     body.nombre ?? body.contact_name ?? body.nombreContacto ?? body.contactName,
     120,
   );
-  const employeeRange = normalizeRange(body.rangoEmpleados ?? body.employee_range ?? body.tamano);
+  let employeeRange = normalizeRange(body.rangoEmpleados ?? body.employee_range ?? body.tamano);
   const traits = asList(body.culturaPercibida ?? body.perceived_culture ?? body.rasgos);
+  const employeeCount = parseEmployeeCount(
+    body.numeroEmpleados ?? body.totalEmpleados ?? body.total_empleados ?? body.employee_count ?? body.nEmpleados,
+  );
+  if (employeeCount != null) {
+    employeeRange = employeeCount <= 50 ? '1 – 50' : employeeCount <= 200 ? '51 – 200'
+      : employeeCount <= 1000 ? '201 – 1.000' : employeeCount <= 5000 ? '1.001 – 5.000' : 'Más de 5.000';
+  }
+  const plantilla = parsePlantilla(
+    body.plantillaPorArea ?? body.plantilla_por_area ?? body.headcount_by_area ?? body.areas,
+    DEFAULT_AREAS,
+  );
   const comment = text(body.comentarioCultura ?? body.culture_comment ?? body.comentario, 280);
   const email = text(body.correo ?? body.email, 255).toLowerCase();
   const consent = consentFlags(body.consentimiento ?? body.consent);
@@ -111,6 +124,14 @@ function normalizeLead(body) {
   if (perceivedCulture.some((item) => !CULTURE_TRAITS.has(item))) {
     throw new ApiError(400, 'invalid_culture', 'Hay un rasgo cultural que no reconocemos.');
   }
+  if (body.numeroEmpleados != null || body.totalEmpleados != null || body.total_empleados != null || body.employee_count != null || body.nEmpleados != null) {
+    if (employeeCount == null) {
+      throw new ApiError(400, 'invalid_headcount', 'El total de empleados debe ser un entero entre 1 y 1.000.000.');
+    }
+  }
+  if (plantilla.length && employeeCount && plantilla.reduce((sum, item) => sum + item.n, 0) > employeeCount) {
+    throw new ApiError(400, 'invalid_plantilla', 'La plantilla por área no puede sumar más que el total de empleados.');
+  }
   if (!EMAIL.test(email)) {
     throw new ApiError(400, 'invalid_email', 'El correo no es válido.');
   }
@@ -127,6 +148,9 @@ function normalizeLead(body) {
     contactName,
     employeeRange,
     perceivedCulture,
+    declaredValues: mapLandingTraits(perceivedCulture),
+    employeeCount,
+    plantilla,
     comment: comment || null,
     email,
     consentTerms: consent.terms,
@@ -142,18 +166,34 @@ function surveyUrlFor(organizationId, baseUrl) {
   return `${String(baseUrl || '').replace(/\/$/, '')}/cultura/${organizationId}`;
 }
 
+function organizationCultureFields(lead) {
+  const fields = {
+    declared_values: lead.declaredValues,
+    size_label: lead.employeeRange,
+    updated_at: new Date(),
+  };
+  if (lead.employeeCount != null) fields.employee_count = lead.employeeCount;
+  if (lead.plantilla?.length) {
+    fields.headcount_by_area = lead.plantilla;
+    fields.areas = lead.plantilla.map((item) => ({id: item.id, label: item.label}));
+  }
+  return fields;
+}
+
 async function provisionProspectOrganization(lead) {
   const existing = await findOne('culture_leads', {email: lead.email});
   if (existing?.organization_id) {
     const organization = await findOne('organizations', {id: existing.organization_id});
-    if (organization) return organization;
+    if (organization) {
+      return updateOne('organizations', {id: organization.id}, organizationCultureFields(lead));
+    }
   }
   const id = randomUUID();
   return insertOne('organizations', {
     id,
     firebase_id: id,
     name: lead.companyName,
-    size_label: lead.employeeRange,
+    ...organizationCultureFields(lead),
     status: 'onboarding',
     source: 'mi-cultura',
     archived: false,
@@ -193,7 +233,10 @@ export async function createCultureLead(body, {baseUrl} = {}) {
     company_name: lead.companyName,
     contact_name: lead.contactName,
     employee_range: lead.employeeRange,
+    employee_count: lead.employeeCount,
+    headcount_by_area: lead.plantilla,
     perceived_culture: lead.perceivedCulture,
+    declared_values: lead.declaredValues,
     culture_comment: lead.comment,
     email: lead.email,
     consent_terms: lead.consentTerms,
@@ -220,6 +263,7 @@ export async function createCultureLead(body, {baseUrl} = {}) {
         companyName: lead.companyName,
         contactName: lead.contactName,
         employeeRange: lead.employeeRange,
+        employeeCount: lead.employeeCount,
         surveyUrl,
       });
       await sendMail({to: lead.email, ...mail});
@@ -238,6 +282,7 @@ export async function createCultureLead(body, {baseUrl} = {}) {
     id,
     organizationId: organization.id,
     surveyUrl,
+    shareToken: await createShareKey(organization.id),
     emailStatus,
     fechaRespuesta: row?.responded_at || row?.created_at,
     lead: publicRow(row),

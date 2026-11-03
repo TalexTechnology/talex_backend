@@ -1,9 +1,16 @@
 import {randomUUID} from 'node:crypto';
 import {count, findMany, findOne, insertOne, updateOne} from '../domain/store.js';
 import {config} from '../config.js';
-import {cultureReportReadyEmail, sendMail, smtpReady} from '../mail.js';
+import {ApiError} from '../http.js';
 import {cultureReportPageHtml} from './culture-report-page.js';
 import {participationFor} from './culture-participation.js';
+import {assertBankManager, resolveOrganizationId} from '../domain/tenancy.js';
+import {DEFAULT_AREAS, parseEmployeeCount, parsePlantilla} from '../domain/culture-model.js';
+import {loadCompanyCultureQuestions} from './culture-employee-survey.js';
+import {listCultureResponses} from './culture-responses.js';
+import {computeCultureMetrics} from './culture-metrics.js';
+import {buildCultureInforme, informeSections} from './culture-diagnosis.js';
+import {culturePdfView, getCultureReportPdfFile, listCultureReportPdfs} from './culture-report-file.js';
 
 const SECTION_OUTLINE = [
   {code: 'cultura', title: 'Cultura vivida'},
@@ -17,8 +24,8 @@ export function ruleForRange(employeeRange) {
   return participationFor(employeeRange);
 }
 
-export function coverageFromCounts({respondents, employeeRange}) {
-  const rule = participationFor(employeeRange);
+export function coverageFromCounts({respondents, employeeRange, employeeCount}) {
+  const rule = participationFor(employeeRange, employeeCount);
   const override = config.cultureReportThreshold;
   const needed =
     override > 0 && override <= 1
@@ -44,15 +51,6 @@ async function employeeRangeFor(organization) {
   return lead?.employee_range || '1 – 50';
 }
 
-async function recipientFor(organization) {
-  const leads = await findMany(
-    'culture_leads',
-    {organization_id: organization.id},
-    {sort: {created_at: 1}, limit: 1},
-  );
-  return leads[0] || null;
-}
-
 export async function cultureCoverage(organizationId) {
   const organization = await findOne('organizations', {id: organizationId});
   if (!organization) return null;
@@ -66,6 +64,7 @@ export async function cultureCoverage(organizationId) {
     coverage: coverageFromCounts({
       respondents,
       employeeRange: await employeeRangeFor(organization),
+      employeeCount: organization.employee_count,
     }),
   };
 }
@@ -74,16 +73,145 @@ export async function getCultureReport(organizationId) {
   const snapshot = await cultureCoverage(organizationId);
   if (!snapshot) return null;
   const report = await findOne('culture_reports', {organization_id: organizationId});
+  const respuestas = await listCultureResponses(organizationId);
+  const files = await listCultureReportPdfs(organizationId);
+  const latestPdf = await getCultureReportPdfFile(organizationId);
   return {
     organizationId: snapshot.organization.id,
     organizationName: snapshot.organization.name,
-    format: report?.format ?? null,
+    format: report?.format ?? 'json',
     status: report?.status || (snapshot.coverage.reached ? 'ready' : 'collecting'),
     coverage: snapshot.coverage,
     sections: report?.sections || SECTION_OUTLINE.map((item) => ({...item, summary: null})),
+    informe: report?.informe || null,
+    respuestas,
     reportUrl: report?.report_url || null,
-    sentAt: report?.sent_at || null,
-    pendingFormat: true,
+    sentAt: report?.pdf_sent_at || report?.sent_at || null,
+    generatedAt: report?.generated_at || null,
+    pendingFormat: !report?.informe,
+    autoSend: {
+      status: report?.auto_send_status || null,
+      thresholdReachedAt: report?.threshold_reached_at || null,
+      sendAt: report?.auto_send_at || null,
+    },
+    pdf: {
+      latest: culturePdfView(organizationId, latestPdf),
+      sentAt: report?.pdf_sent_at || null,
+      sentTo: report?.pdf_sent_to || null,
+      emailStatus: report?.pdf_email_status || latestPdf?.email_status || null,
+      files,
+    },
+  };
+}
+
+async function leadFor(organizationId) {
+  const rows = await findMany(
+    'culture_leads',
+    {organization_id: organizationId},
+    {sort: {created_at: 1}, limit: 1},
+  );
+  return rows[0] || null;
+}
+
+export async function generatePublicDemoReport(organizationId) {
+  const organization = await findOne('organizations', {id: organizationId});
+  if (!organization || organization.source !== 'demo') {
+    throw new ApiError(403, 'permission_denied', 'Este informe de prueba solo se genera para la empresa demo.');
+  }
+  return generateCultureReport(
+    {isSuperadmin: true, profile: {id: 'demo-generator'}},
+    {
+      p_organization_id: organization.id,
+      p_total_empleados: organization.employee_count,
+      p_plantilla_por_area: organization.headcount_by_area,
+    },
+  );
+}
+
+export async function generateCultureReport(actor, body = {}) {
+  assertBankManager(actor);
+  const organizationId = await resolveOrganizationId(body.p_organization_id);
+  const organization = organizationId ? await findOne('organizations', {id: organizationId}) : null;
+  if (!organization) throw new ApiError(404, 'company_not_found');
+  const lead = await leadFor(organization.id);
+  const employeeCount = parseEmployeeCount(
+    body.p_total_empleados ?? body.p_employee_count ?? organization.employee_count ?? lead?.employee_count,
+  );
+  const plantilla = parsePlantilla(
+    body.p_plantilla_por_area ?? body.p_headcount_by_area ?? organization.headcount_by_area ?? lead?.headcount_by_area,
+    DEFAULT_AREAS,
+  );
+  if (employeeCount == null) {
+    throw new ApiError(400, 'missing_headcount', 'Indica p_total_empleados (N de la empresa).');
+  }
+  if (!plantilla.length) {
+    throw new ApiError(400, 'missing_plantilla', 'Indica p_plantilla_por_area: [{area, n}, ...].');
+  }
+  if (plantilla.reduce((sum, item) => sum + item.n, 0) > employeeCount) {
+    throw new ApiError(400, 'invalid_plantilla', 'La plantilla por área no puede sumar más que el total de empleados.');
+  }
+  await updateOne('organizations', {id: organization.id}, {
+    employee_count: employeeCount,
+    headcount_by_area: plantilla,
+    areas: plantilla.map((item) => ({id: item.id, label: item.label})),
+    updated_at: new Date(),
+  });
+  const sessions = await findMany('survey_sessions', {
+    organization_id: organization.id,
+    purpose: 'culture_perception',
+    status: 'completed',
+  }, {limit: 5000});
+  const answers = sessions.length
+    ? await findMany('survey_answers', {session_id: {$in: sessions.map((item) => item.id)}}, {limit: 5000})
+    : [];
+  const survey = await loadCompanyCultureQuestions(
+    {...organization, employee_count: employeeCount, headcount_by_area: plantilla},
+    lead,
+  );
+  const metrics = computeCultureMetrics({
+    organization: {...organization, name: organization.name, employee_count: employeeCount},
+    lead,
+    questions: survey.questions,
+    sessions,
+    answers,
+    totalEmpleados: employeeCount,
+    plantilla,
+    fechaCorte: new Date().toISOString().slice(0, 10),
+  });
+  const informe = buildCultureInforme(metrics);
+  const now = new Date();
+  const snapshot = await cultureCoverage(organization.id);
+  const draft = {
+    format: 'json',
+    status: 'generated',
+    coverage: snapshot?.coverage,
+    sections: informeSections(informe),
+    informe,
+    generated_at: now,
+    generated_by: actor.profile.id,
+    email: lead?.email || null,
+    updated_at: now,
+  };
+  const existing = await findOne('culture_reports', {organization_id: organization.id});
+  const report = existing
+    ? await updateOne('culture_reports', {id: existing.id}, draft)
+    : await insertOne('culture_reports', {
+        id: randomUUID(),
+        organization_id: organization.id,
+        email_status: existing?.email_status || 'pending',
+        sent_at: existing?.sent_at || null,
+        report_url: `${String(body.p_base_url || config.publicSurveyBase || 'https://platform.talex.com.co').replace(/\/$/, '')}/cultura/${organization.id}/informe`,
+        created_at: now,
+        ...draft,
+      });
+  return {
+    organizationId: organization.id,
+    organizationName: organization.name,
+    status: report.status,
+    generatedAt: report.generated_at,
+    informe,
+    coverage: report.coverage,
+    sections: report.sections,
   };
 }
 
@@ -91,57 +219,45 @@ export function renderCultureReportPage(organizationId) {
   return cultureReportPageHtml(organizationId);
 }
 
-export async function maybeReleaseCultureReport(organization, {baseUrl} = {}) {
-  const existing = await findOne('culture_reports', {organization_id: organization.id});
-  if (existing?.status === 'sent') return existing;
+function delayMs() {
+  const hours = Number(config.cultureReportDelayHours);
+  const safe = Number.isFinite(hours) && hours >= 0 ? hours : 24;
+  return Math.round(safe * 60 * 60 * 1000);
+}
+
+function alreadyAutoSent(report) {
+  return (
+    report?.auto_send_status === 'sent' ||
+    report?.pdf_email_status === 'sent' ||
+    Boolean(report?.pdf_sent_to)
+  );
+}
+
+export async function maybeReleaseCultureReport(organization) {
   const snapshot = await cultureCoverage(organization.id);
-  if (!snapshot?.coverage.reached) return existing || null;
-  const lead = await recipientFor(organization);
-  const reportUrl = `${String(baseUrl || '').replace(/\/$/, '')}/cultura/${organization.id}/informe`;
+  if (!snapshot?.coverage.reached) return snapshot ? {status: 'collecting'} : null;
+  const existing = await findOne('culture_reports', {organization_id: organization.id});
+  if (alreadyAutoSent(existing) || existing?.threshold_reached_at) return existing;
   const now = new Date();
+  const lead = await leadFor(organization.id);
   const draft = {
-    format: null,
-    status: 'ready',
+    status: 'waiting_delay',
     coverage: snapshot.coverage,
-    sections: SECTION_OUTLINE.map((item) => ({...item, summary: null})),
-    email: lead?.email || null,
-    report_url: reportUrl,
+    email: lead?.email || existing?.email || null,
+    threshold_reached_at: now,
+    auto_send_at: new Date(now.getTime() + delayMs()),
+    auto_send_status: 'pending',
+    auto_send_attempts: 0,
     updated_at: now,
   };
-  const report = existing
-    ? await updateOne('culture_reports', {id: existing.id}, draft)
-    : await insertOne('culture_reports', {
-        id: randomUUID(),
-        organization_id: organization.id,
-        email_status: 'pending',
-        sent_at: null,
-        created_at: now,
-        ...draft,
-      });
-  let emailStatus = 'skipped';
-  if (lead?.email && smtpReady()) {
-    try {
-      await sendMail({
-        to: lead.email,
-        ...cultureReportReadyEmail({
-          companyName: organization.name,
-          contactName: lead?.contact_name,
-          reportUrl,
-          coverage: snapshot.coverage,
-        }),
-      });
-      emailStatus = 'sent';
-    } catch (error) {
-      emailStatus = 'failed';
-      console.error('culture report email failed', error.code || error.message);
-    }
-  } else if (!smtpReady()) {
-    console.error('culture report email skipped: smtp_unconfigured');
-  }
-  return updateOne('culture_reports', {id: report.id}, {
-    status: emailStatus === 'sent' ? 'sent' : 'ready',
-    email_status: emailStatus,
-    sent_at: emailStatus === 'sent' ? now : null,
-    updated_at: new Date(),
+  if (existing) return updateOne('culture_reports', {id: existing.id}, draft);
+  return insertOne('culture_reports', {
+    id: randomUUID(),
+    organization_id: organization.id,
+    format: null,
+    email_status: 'pending',
+    sent_at: null,
+    created_at: now,
+    ...draft,
   });
 }

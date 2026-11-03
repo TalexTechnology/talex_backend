@@ -1,3 +1,5 @@
+import {requiredSample} from '../domain/culture-model.js';
+
 function normalizeRange(value) {
   return String(value || '')
     .trim()
@@ -84,9 +86,17 @@ const FALLBACK = {
   tip: 'Invita a la mayor parte de las personas que viven el día a día.',
 };
 
-export function participationFor(employeeRange) {
+export function participationFor(employeeRange, employeeCount) {
+  const exact = requiredSample(employeeCount);
   const key = normalizeRange(employeeRange);
   const mapped = ALIASES[key];
-  if (mapped && typeof mapped === 'object') return mapped;
-  return RULES[mapped] || RULES[key] || FALLBACK;
+  const rule = (mapped && typeof mapped === 'object' ? mapped : null) || RULES[mapped] || RULES[key] || FALLBACK;
+  if (exact == null) return rule;
+  return {
+    ...rule,
+    estimate: employeeCount,
+    minimum: Math.min(rule.minimum, exact),
+    needed: exact,
+    neededText: `Con ${employeeCount} personas, la muestra requerida es ${exact} respuestas (fórmula 384).`,
+  };
 }

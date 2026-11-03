@@ -1,5 +1,6 @@
 import {findMany} from '../domain/store.js';
 import {ApiError} from '../http.js';
+import {areaCatalog, mapLandingTraits} from '../domain/culture-model.js';
 
 export const EMPLOYEE_CULTURE_BANK = 'employee-culture-v1';
 
@@ -28,23 +29,22 @@ function uniqueTexts(values) {
 }
 
 export function declaredValuesFor(organization, lead, fallback = []) {
-  const configured = uniqueTexts([
-    ...asList(organization?.declared_values),
-    ...asList(organization?.values),
-    ...asList(organization?.culture_values),
-  ]);
-  if (configured.length) return configured;
-  const fromLead = uniqueTexts(asList(lead?.perceived_culture));
+  const fromOrg = mapLandingTraits(
+    organization?.declared_values || organization?.values || organization?.culture_values || [],
+  );
+  if (fromOrg.length) return fromOrg;
+  const fromLead = mapLandingTraits(asList(lead?.perceived_culture));
   if (fromLead.length) return fromLead;
-  return uniqueTexts(fallback);
+  return mapLandingTraits(fallback).length ? mapLandingTraits(fallback) : uniqueTexts(fallback);
 }
 
 export function areasFor(organization, fallback = []) {
-  const configured = uniqueTexts([
-    ...asList(organization?.areas),
-    ...asList(organization?.departments),
-  ]);
-  return configured.length ? configured : uniqueTexts(fallback);
+  const catalog = areaCatalog(organization);
+  if (catalog.length && (organization?.headcount_by_area || organization?.areas || organization?.departments)) {
+    return catalog;
+  }
+  const fromFallback = uniqueTexts(fallback);
+  return fromFallback.length ? fromFallback : catalog;
 }
 
 export function hydrateCompanyCultureQuestions(rows, organization, lead) {

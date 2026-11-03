@@ -35,13 +35,14 @@ export function cultureReportPageHtml(organizationId) {
       .then(({ok, body}) => {
         if (!ok) throw new Error(body.message || 'No encontramos este informe.');
         const c = body.coverage || {};
-        const collecting = body.status === 'collecting';
+        const informe = body.informe;
+        const collecting = body.status === 'collecting' && !informe;
         app.innerHTML =
           '<p class="lead">Hola ' + escapeHtml(body.organizationName || 'equipo') + '</p>' +
-          '<h1>' + (collecting ? 'El informe aún se está construyendo' : 'Avance del informe cultural') + '</h1>' +
-          '<p class="lead">' + (collecting
+          '<h1>' + (informe?.resumen_ejecutivo?.titular || (collecting ? 'El informe aún se está construyendo' : 'Avance del informe cultural')) + '</h1>' +
+          '<p class="lead">' + (informe?.resumen_ejecutivo?.verdad_incomoda || (collecting
             ? 'Cuando el equipo alcance el umbral de participación, este espacio mostrará la lectura cultural de la organización.'
-            : 'Ya hay suficientes respuestas para armar el informe. El formato final (PDF o web) todavía no está definido; esta es la estructura lista para llenarse.') + '</p>' +
+            : 'Ya hay suficientes respuestas para armar el informe. El formato final (PDF o web) todavía no está definido; esta es la estructura lista para llenarse.')) + '</p>' +
           '<div class="card kpis">' +
             kpi('Respuestas', c.respondents ?? 0) +
             kpi('Umbral', (c.needed ?? 0) + ' personas') +

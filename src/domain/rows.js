@@ -26,7 +26,11 @@ const JSON_COLUMNS = new Set([
   'data_gaps',
   'metadata',
   'perceived_culture',
+  'declared_values',
+  'headcount_by_area',
+  'areas',
   'consent_payload',
+  'informe',
 ]);
 
 const HIDDEN_COLUMNS = new Set(['pin_hash', 'token_hash']);

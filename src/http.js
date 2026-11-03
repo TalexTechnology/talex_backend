@@ -24,6 +24,20 @@ export function redirect(response, location) {
   response.end();
 }
 
+export function sendPdf(response, buffer, {filename, download = false} = {}) {
+  const disposition = download ? 'attachment' : 'inline';
+  response.writeHead(200, {
+    'Content-Type': 'application/pdf',
+    'Content-Disposition': `${disposition}; filename="${String(filename || 'informe.pdf').replace(/"/g, '')}"`,
+    'Content-Length': buffer.length,
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Cache-Control': 'no-store',
+  });
+  response.end(buffer);
+}
+
 export function json(response, status, body) {
   const payload = JSON.stringify(body);
   response.writeHead(status, {

@@ -67,7 +67,14 @@ const INDEXES = {
     [{organization_id: 1, created_at: -1}],
   ],
   firebase_id_map: [[{collection_name: 1, firebase_id: 1}, {unique: true}]],
-  culture_reports: [[{organization_id: 1}, {unique: true}]],
+  culture_reports: [
+    [{organization_id: 1}, {unique: true}],
+    [{auto_send_status: 1, auto_send_at: 1}],
+  ],
+  culture_report_files: [
+    [{organization_id: 1, version: -1}],
+    [{organization_id: 1, created_at: -1}],
+  ],
   company_culture_questions: [
     [{bank: 1, code: 1}, {unique: true}],
     [{bank: 1, is_active: 1, sort_order: 1}],
@@ -77,6 +84,15 @@ const INDEXES = {
     [{status: 1, created_at: -1}],
     [{organization_id: 1}],
     [{created_at: -1}],
+  ],
+  culture_visits: [
+    [{id: 1}, {unique: true}],
+    [{organization_id: 1, visitor_hash: 1}],
+  ],
+  culture_sharing: [[{organization_id: 1}, {unique: true}]],
+  culture_share_keys: [
+    [{token_hash: 1}, {unique: true}],
+    [{expires_at: 1}, {expireAfterSeconds: 0}],
   ],
 };
 
