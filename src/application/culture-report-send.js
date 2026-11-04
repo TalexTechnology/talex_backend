@@ -31,6 +31,7 @@ export async function publishCultureReportPdf(actor, body = {}, {baseUrl} = {}) 
       p_organization_id: organization.id,
       p_total_empleados: body.p_total_empleados,
       p_plantilla_por_area: body.p_plantilla_por_area,
+      allow_sparse: body.allow_sparse === true,
     });
     report = await findOne('culture_reports', {organization_id: organization.id});
   }

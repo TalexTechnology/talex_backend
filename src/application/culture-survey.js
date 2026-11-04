@@ -21,6 +21,7 @@ async function leadFor(organizationId) {
 export async function getCultureSurvey(organizationId) {
   const organization = await findOne('organizations', {id: organizationId});
   if (!organization) throw new ApiError(404, 'company_not_found');
+  await assertSurveyOpen(organization.id);
   const lead = await leadFor(organization.id);
   const survey = await loadCompanyCultureQuestions(organization, lead);
   return {
@@ -36,6 +37,7 @@ export async function getCultureSurvey(organizationId) {
 export async function submitCultureSurvey(organizationId, body, {baseUrl} = {}) {
   const organization = await findOne('organizations', {id: organizationId});
   if (!organization) throw new ApiError(404, 'company_not_found');
+  await assertSurveyOpen(organization.id);
   const lead = await leadFor(organization.id);
   const {questions} = await loadCompanyCultureQuestions(organization, lead);
   const answers = validateCultureAnswers(questions, body?.answers);
@@ -89,4 +91,11 @@ export async function submitCultureSurvey(organizationId, body, {baseUrl} = {}) 
     autoSendAt: report?.auto_send_at || null,
     reportUrl: report?.report_url || null,
   };
+}
+
+async function assertSurveyOpen(organizationId) {
+  const report = await findOne('culture_reports', {organization_id: organizationId});
+  if (report?.auto_send_at && new Date(report.auto_send_at).getTime() <= Date.now()) {
+    throw new ApiError(410, 'survey_closed', 'El plazo de 24 horas terminó. El informe se prepara con las respuestas recibidas hasta el cierre.');
+  }
 }

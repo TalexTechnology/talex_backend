@@ -6,6 +6,7 @@ import {randomToken, sha256Hex} from '../domain/crypto.js';
 import {cultureShareEmail, sendMail, smtpReady} from '../mail.js';
 import {DEFAULT_AREAS, mapLandingTraits, parseEmployeeCount, parsePlantilla} from '../domain/culture-model.js';
 import {createShareKey} from './culture-tracking.js';
+import {maybeReleaseCultureReport} from './culture-report.js';
 
 const EMPLOYEE_RANGES = new Set([
   '1 – 50',
@@ -250,6 +251,7 @@ export async function createCultureLead(body, {baseUrl} = {}) {
     user_agent: lead.userAgent,
     survey_url: surveyUrl,
     email_status: 'pending',
+    delivery_policy: 'fixed_24h',
     source: 'mi-cultura',
     status: 'new',
     responded_at: now,
@@ -275,7 +277,8 @@ export async function createCultureLead(body, {baseUrl} = {}) {
   } else {
     console.error('culture share email skipped: smtp_unconfigured');
   }
-  await updateOne('culture_leads', {id}, {email_status: emailStatus, updated_at: new Date()});
+  await updateOne('culture_leads', {id}, {email_status: emailStatus, survey_sent_at: new Date(), updated_at: new Date()});
+  await maybeReleaseCultureReport(organization);
   const row = await findOne('culture_leads', {id});
   return {
     success: true,

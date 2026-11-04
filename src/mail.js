@@ -1,6 +1,5 @@
 import nodemailer from 'nodemailer';
 import {config} from './config.js';
-import {participationFor} from './application/culture-participation.js';
 
 const LOGO_URL = 'https://www.talex.com.co/talex_logo_horizontal_fondo_oscuro.png';
 
@@ -61,7 +60,6 @@ export async function sendMail({to, subject, text, html, attachments}) {
 export function cultureShareEmail({
   companyName,
   contactName,
-  employeeRange,
   employeeCount,
   surveyUrl,
 }) {
@@ -74,14 +72,16 @@ export function cultureShareEmail({
   }
 
   const safeUrl = escapeHtml(url.href);
-  const participation = participationFor(employeeRange, employeeCount);
+  const teamInvitation = Number.isInteger(employeeCount) && employeeCount > 0
+    ? `Tu empresa tiene ${employeeCount.toLocaleString('es-CO')} personas. Lo ideal es que todas respondan para escuchar a todo el equipo.`
+    : 'Lo ideal es que todas las personas de tu empresa respondan para escuchar a todo el equipo.';
 
   const subject = company
     ? `${company}: descubre la cultura que vive tu equipo`
     : 'Descubre la cultura que vive tu equipo';
 
   const preheader =
-    'Comparte el diagnóstico con tu equipo y conoce cuántas respuestas necesitas para tu informe.';
+    'Invita a todo tu equipo. En 24 horas recibirás el resultado con las respuestas recibidas.';
 
   const text = [
     `Hola ${name},`,
@@ -103,9 +103,9 @@ export function cultureShareEmail({
     '',
     '2. Pide a cada persona que complete la encuesta de forma individual, pensando en lo que vive en su día a día: cómo toman decisiones, colaboran y se relacionan.',
     '',
-    `3. Alcancen el mínimo de participación. ${participation.title}. ${participation.neededText} ${participation.tip}`,
+    `3. Invita a todo tu equipo. ${teamInvitation}`,
     '',
-    'Tu informe estará disponible 24 horas después de alcanzar ese mínimo. El plazo comienza cuando se cumple, no cuando compartes el enlace.',
+    'Tu equipo tiene 24 horas para responder a partir del envío de este correo. Al cumplirse el plazo, te enviaremos el resultado con las respuestas recibidas. Si nadie responde, recibirás un informe que indique que no hay datos para analizar.',
     '',
     'Puedes copiar el enlace y compartirlo por correo, WhatsApp o el canal que use tu equipo. Reenvíalo como recordatorio a quienes aún no hayan completado la encuesta.',
     '',
@@ -229,21 +229,21 @@ export function cultureShareEmail({
               </p>
 
               <p style="margin:0 0 20px;font-size:15px;line-height:1.7;color:#4b5563;">
-                <strong style="color:#254a78;">3. Alcancen el mínimo de participación.</strong><br>
-                ${escapeHtml(participation.title)}. ${escapeHtml(participation.neededText)}
+                <strong style="color:#254a78;">3. Invita a todo tu equipo.</strong><br>
+                ${escapeHtml(teamInvitation)}
               </p>
 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background-color:#f3f6fa;border-left:4px solid #a4e765;">
                 <tr>
                   <td style="padding:18px 20px;">
                     <p style="margin:0 0 8px;font-size:15px;font-weight:700;line-height:1.7;color:#0b1528;">
-                      ${escapeHtml(participation.tip)}
+                      Tienen 24 horas para responder desde el envío de este correo.
                     </p>
                     <p style="margin:0 0 8px;font-size:15px;font-weight:700;line-height:1.7;color:#0b1528;">
-                      Tu informe estará disponible 24 horas después de alcanzar ese mínimo.
+                      Al cumplirse las 24 horas, te enviaremos el resultado con las respuestas recibidas.
                     </p>
                     <p style="margin:0;font-size:13px;line-height:1.7;color:#596779;">
-                      El plazo comienza cuando se cumple, no cuando compartes el enlace.
+                      Si nadie responde, recibirás un informe que indique que no hay datos para analizar. Cuantas más personas participen, más completa será la lectura de tu equipo.
                     </p>
                   </td>
                 </tr>
@@ -316,14 +316,22 @@ export function cultureReportPdfEmail({companyName, contactName, coverage, titul
   const company = companyName?.trim() || 'tu empresa';
   const respondents = coverage?.respondents ?? 0;
   const subject = `Informe cultural de ${company}`;
-  const headline = titular || 'Ya puedes leer la cultura que vive tu equipo.';
+  const headline = respondents === 0
+    ? 'No recibimos respuestas para tu diagnóstico cultural.'
+    : titular || 'Ya puedes leer el resultado de tu diagnóstico cultural.';
+  const qualityNote = respondents === 0
+    ? 'El informe registra la ausencia de respuestas y no permite describir la cultura del equipo.'
+    : coverage?.reached === false
+      ? 'El resultado se basa en las personas que respondieron. La participación fue baja y los hallazgos no representan necesariamente a todo el equipo.'
+      : 'El resultado se basa en las respuestas recibidas durante el plazo de participación.';
   const text = [
     `Hola ${name},`,
     '',
     `El informe cultural de ${company} ya está listo.`,
     headline,
     '',
-    `Se construyó con ${respondents} respuestas del equipo.`,
+    `Se recibieron ${respondents} respuestas del equipo.`,
+    qualityNote,
     'Adjuntamos el PDF para que lo revises con calma y lo compartas con liderazgo.',
     '',
     'El equipo de TaleX',
@@ -359,11 +367,11 @@ export function cultureReportPdfEmail({companyName, contactName, coverage, titul
               </p>
               <p style="margin:0 0 16px;font-size:16px;line-height:1.7;color:#4b5563;">
                 El informe cultural de <strong style="color:#0b1528;">${escapeHtml(company)}</strong> ya está listo.
-                Se construyó con ${respondents} respuestas del equipo.
+                Se recibieron ${respondents} respuestas del equipo. ${escapeHtml(qualityNote)}
               </p>
               <p style="margin:0 0 24px;font-size:16px;line-height:1.7;color:#4b5563;">
                 Adjuntamos el PDF para que lo revises con calma y lo compartas con liderazgo.
-                La lectura contrasta lo que viven los empleados con lo que describe el liderazgo.
+                El informe explica los hallazgos disponibles y sus límites según la participación.
               </p>
             </td>
           </tr>
@@ -404,14 +412,12 @@ export function cultureReportPdfEmail({companyName, contactName, coverage, titul
 export function cultureReportReadyEmail({companyName, contactName, reportUrl, coverage}) {
   const name = contactName || companyName || 'equipo';
   const respondents = coverage?.respondents ?? 0;
-  const needed = coverage?.needed ?? 0;
-  const percent = coverage?.percent ?? 0;
   const subject = `Informe cultural de ${name}`;
   const text = [
     `Hola ${name},`,
     '',
-    `Ya alcanzaron el umbral de participación (${respondents} respuestas, ${percent}% sobre el tamaño estimado).`,
-    'El informe cultural está listo para armarse. Todavía no definimos si la versión final será PDF o web; por ahora pueden ver el avance aquí:',
+    `Se recibieron ${respondents} respuestas del equipo.`,
+    'Puedes consultar el estado de tu diagnóstico cultural aquí. El resultado se enviará por correo al cumplirse las 24 horas de participación:',
     '',
     reportUrl,
   ].join('\n');
@@ -431,11 +437,10 @@ export function cultureReportReadyEmail({companyName, contactName, reportUrl, co
           <td style="padding:36px 36px 8px;color:#1b2430;">
             <p style="margin:0 0 18px;font-size:26px;line-height:1.25;">Hola ${escapeHtml(name)}</p>
             <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#3d4550;">
-              Ya alcanzaron el umbral de participación:
-              <strong>${respondents} respuestas</strong> (${percent}% del tamaño estimado; se pedían ${needed}).
+              Se recibieron <strong>${respondents} respuestas del equipo</strong>.
             </p>
             <p style="margin:0 0 28px;font-size:16px;line-height:1.6;color:#3d4550;">
-              El informe cultural ya se puede armar. El formato final (PDF o web) todavía no está definido; este avance deja lista la estructura.
+              Puedes consultar el estado de tu diagnóstico cultural aquí. El resultado se enviará por correo al cumplirse las 24 horas de participación.
             </p>
             <p style="margin:0 0 28px;">
               <a href="${escapeHtml(reportUrl)}"

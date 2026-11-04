@@ -52,7 +52,7 @@ export async function handleRequest(request, response) {
         (vercelCron && !config.cronSecret) ||
         Boolean(demoReportActor(request));
       if (!allowed) throw new ApiError(401, 'need_sign_in');
-      json(response, 200, await releaseDueCultureReports({baseUrl: apiBase(request, url)}));
+      json(response, 200, await releaseDueCultureReports({baseUrl: apiBase(request, url), dryRun: url.searchParams.get('dryRun') === '1'}));
       return;
     }
     if (request.method === 'GET' && url.pathname === '/health') {

@@ -141,19 +141,22 @@ export async function generateCultureReport(actor, body = {}) {
     body.p_plantilla_por_area ?? body.p_headcount_by_area ?? organization.headcount_by_area ?? lead?.headcount_by_area,
     DEFAULT_AREAS,
   );
-  if (employeeCount == null) {
+  const allowSparse = body.allow_sparse === true;
+  if (employeeCount == null && !allowSparse) {
     throw new ApiError(400, 'missing_headcount', 'Indica p_total_empleados (N de la empresa).');
   }
-  if (!plantilla.length) {
+  if (!plantilla.length && !allowSparse) {
     throw new ApiError(400, 'missing_plantilla', 'Indica p_plantilla_por_area: [{area, n}, ...].');
   }
-  if (plantilla.reduce((sum, item) => sum + item.n, 0) > employeeCount) {
+  if (employeeCount != null && plantilla.reduce((sum, item) => sum + item.n, 0) > employeeCount) {
     throw new ApiError(400, 'invalid_plantilla', 'La plantilla por área no puede sumar más que el total de empleados.');
   }
   await updateOne('organizations', {id: organization.id}, {
-    employee_count: employeeCount,
-    headcount_by_area: plantilla,
-    areas: plantilla.map((item) => ({id: item.id, label: item.label})),
+    ...(employeeCount != null ? {employee_count: employeeCount} : {}),
+    ...(plantilla.length ? {
+      headcount_by_area: plantilla,
+      areas: plantilla.map((item) => ({id: item.id, label: item.label})),
+    } : {}),
     updated_at: new Date(),
   });
   const sessions = await findMany('survey_sessions', {
@@ -229,23 +232,27 @@ function alreadyAutoSent(report) {
   return (
     report?.auto_send_status === 'sent' ||
     report?.pdf_email_status === 'sent' ||
-    Boolean(report?.pdf_sent_to)
+    Boolean(report?.pdf_sent_at)
   );
 }
 
 export async function maybeReleaseCultureReport(organization) {
   const snapshot = await cultureCoverage(organization.id);
-  if (!snapshot?.coverage.reached) return snapshot ? {status: 'collecting'} : null;
+  if (!snapshot) return null;
   const existing = await findOne('culture_reports', {organization_id: organization.id});
-  if (alreadyAutoSent(existing) || existing?.threshold_reached_at) return existing;
+  if (alreadyAutoSent(existing) || existing?.auto_send_at) return existing;
   const now = new Date();
-  const lead = await leadFor(organization.id);
+  const lead = await findOne('culture_leads', {
+    organization_id: organization.id, delivery_policy: 'fixed_24h',
+  }, {created_at: -1}) || await leadFor(organization.id);
+  const invitedAt = new Date(lead?.survey_sent_at || lead?.created_at || now);
   const draft = {
     status: 'waiting_delay',
     coverage: snapshot.coverage,
     email: lead?.email || existing?.email || null,
-    threshold_reached_at: now,
-    auto_send_at: new Date(now.getTime() + delayMs()),
+    threshold_reached_at: snapshot.coverage.reached ? now : null,
+    survey_sent_at: invitedAt,
+    auto_send_at: new Date(invitedAt.getTime() + delayMs()),
     auto_send_status: 'pending',
     auto_send_attempts: 0,
     updated_at: now,

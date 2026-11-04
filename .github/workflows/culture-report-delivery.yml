@@ -1,0 +1,44 @@
+name: Deliver culture reports after 24 hours
+
+on:
+  schedule:
+    - cron: '3-58/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Check configuration without sending emails
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: culture-report-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Deliver due reports
+        env:
+          SCHEDULER_SECRET: ${{ secrets.CULTURE_SCHEDULER_SECRET }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '1' || '0' }}
+        run: |
+          test -n "$SCHEDULER_SECRET"
+          curl --fail --silent --show-error --max-time 60 \
+            -X POST "https://api.talex.com.co/api/cron/culture-reports?dryRun=$DRY_RUN" \
+            -H "Authorization: Bearer $SCHEDULER_SECRET" \
+            -o "$RUNNER_TEMP/culture-report-status.json"
+          python3 - "$RUNNER_TEMP/culture-report-status.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1]) as stream:
+              result = json.load(stream)
+          results = result.get('results', [])
+          failed = sum(row.get('status') != 'sent' for row in results)
+          print(f"Checked: {result.get('checked', 0)}. Sent: {len(results) - failed}. Failed: {failed}.")
+          if not result.get('ok') or failed:
+              sys.exit(1)
+          PY
