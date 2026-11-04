@@ -39,7 +39,6 @@ export const config = {
   mongodbDatabase: env('MONGODB_DB', 'talex'),
   publicSurveyBase: env('PUBLIC_SURVEY_BASE', 'https://platform.talex.com.co'),
   cultureReportThreshold: Number(env('CULTURE_REPORT_THRESHOLD', '0')),
-  cultureReportDelayHours: Number(env('CULTURE_REPORT_DELAY_HOURS', '24')),
   cronSecret: env('CRON_SECRET', ''),
   smtp: {
     host: env('SMTP_HOST', ''),

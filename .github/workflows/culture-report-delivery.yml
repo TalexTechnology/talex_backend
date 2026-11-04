@@ -1,4 +1,4 @@
-name: Deliver culture reports after 24 hours
+name: Deliver culture reminders and reports
 
 on:
   schedule:
@@ -38,7 +38,8 @@ jobs:
               result = json.load(stream)
           results = result.get('results', [])
           failed = sum(row.get('status') != 'sent' for row in results)
-          print(f"Checked: {result.get('checked', 0)}. Sent: {len(results) - failed}. Failed: {failed}.")
-          if not result.get('ok') or failed:
+          reminder_failures = result.get('reminderFailures', 0)
+          print(f"Checked: {result.get('checked', 0)} reports. Sent: {len(results) - failed}. Failed reports: {failed}. Failed reminders: {reminder_failures}.")
+          if not result.get('ok') or failed or reminder_failures:
               sys.exit(1)
           PY

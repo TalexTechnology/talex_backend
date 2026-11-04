@@ -223,9 +223,7 @@ export function renderCultureReportPage(organizationId) {
 }
 
 function delayMs() {
-  const hours = Number(config.cultureReportDelayHours);
-  const safe = Number.isFinite(hours) && hours >= 0 ? hours : 24;
-  return Math.round(safe * 60 * 60 * 1000);
+  return 72 * 60 * 60 * 1000;
 }
 
 function alreadyAutoSent(report) {
@@ -240,19 +238,32 @@ export async function maybeReleaseCultureReport(organization) {
   const snapshot = await cultureCoverage(organization.id);
   if (!snapshot) return null;
   const existing = await findOne('culture_reports', {organization_id: organization.id});
-  if (alreadyAutoSent(existing) || existing?.auto_send_at) return existing;
+  if (alreadyAutoSent(existing)) return existing;
   const now = new Date();
   const lead = await findOne('culture_leads', {
-    organization_id: organization.id, delivery_policy: 'fixed_24h',
+    organization_id: organization.id, delivery_policy: 'fixed_72h',
   }, {created_at: -1}) || await leadFor(organization.id);
   const invitedAt = new Date(lead?.survey_sent_at || lead?.created_at || now);
+  const expectedSendAt = new Date(invitedAt.getTime() + delayMs());
+  if (existing?.auto_send_at) {
+    if (
+      ['pending', 'failed'].includes(existing.auto_send_status) &&
+      new Date(existing.auto_send_at).getTime() < expectedSendAt.getTime()
+    ) {
+      return updateOne('culture_reports', {id: existing.id}, {
+        auto_send_at: expectedSendAt,
+        updated_at: now,
+      });
+    }
+    return existing;
+  }
   const draft = {
     status: 'waiting_delay',
     coverage: snapshot.coverage,
     email: lead?.email || existing?.email || null,
     threshold_reached_at: snapshot.coverage.reached ? now : null,
     survey_sent_at: invitedAt,
-    auto_send_at: new Date(invitedAt.getTime() + delayMs()),
+    auto_send_at: expectedSendAt,
     auto_send_status: 'pending',
     auto_send_attempts: 0,
     updated_at: now,

@@ -81,7 +81,7 @@ export function cultureShareEmail({
     : 'Descubre la cultura que vive tu equipo';
 
   const preheader =
-    'Invita a todo tu equipo. En 24 horas recibirás el resultado con las respuestas recibidas.';
+    'Invita a todo tu equipo. En 72 horas recibirás el resultado con las respuestas recibidas.';
 
   const text = [
     `Hola ${name},`,
@@ -105,7 +105,7 @@ export function cultureShareEmail({
     '',
     `3. Invita a todo tu equipo. ${teamInvitation}`,
     '',
-    'Tu equipo tiene 24 horas para responder a partir del envío de este correo. Al cumplirse el plazo, te enviaremos el resultado con las respuestas recibidas. Si nadie responde, recibirás un informe que indique que no hay datos para analizar.',
+    'Tu equipo tiene 72 horas para responder a partir del envío de este correo. Al cumplirse el plazo, te enviaremos el resultado con las respuestas recibidas. Si nadie responde, recibirás un informe que indique que no hay datos para analizar. La profundidad del informe dependerá de la cantidad de respuestas; con pocos datos, será una lectura limitada y te indicaremos qué información falta.',
     '',
     'Puedes copiar el enlace y compartirlo por correo, WhatsApp o el canal que use tu equipo. Reenvíalo como recordatorio a quienes aún no hayan completado la encuesta.',
     '',
@@ -237,13 +237,13 @@ export function cultureShareEmail({
                 <tr>
                   <td style="padding:18px 20px;">
                     <p style="margin:0 0 8px;font-size:15px;font-weight:700;line-height:1.7;color:#0b1528;">
-                      Tienen 24 horas para responder desde el envío de este correo.
+                      Tienen 72 horas para responder desde el envío de este correo.
                     </p>
                     <p style="margin:0 0 8px;font-size:15px;font-weight:700;line-height:1.7;color:#0b1528;">
-                      Al cumplirse las 24 horas, te enviaremos el resultado con las respuestas recibidas.
+                      Al cumplirse las 72 horas, te enviaremos el resultado con las respuestas recibidas.
                     </p>
                     <p style="margin:0;font-size:13px;line-height:1.7;color:#596779;">
-                      Si nadie responde, recibirás un informe que indique que no hay datos para analizar. Cuantas más personas participen, más completa será la lectura de tu equipo.
+                      Si nadie responde, el informe indicará que no hay datos para analizar. La profundidad dependerá de cuántas personas participen; con pocos datos, será una lectura limitada y te indicaremos qué información falta.
                     </p>
                   </td>
                 </tr>
@@ -309,6 +309,70 @@ export function cultureShareEmail({
 </html>`;
 
   return {subject, text, html};
+}
+
+export function cultureReminderEmail({stage, contactName, companyName, surveyUrl, employeeCount}) {
+  const name = contactName?.trim() || companyName?.trim() || 'equipo';
+  const company = companyName?.trim() || 'tu empresa';
+  const url = surveyUrl ? new URL(surveyUrl) : null;
+  if (url && !['https:', 'http:'].includes(url.protocol)) {
+    throw new Error('El enlace del diagnóstico debe usar HTTP o HTTPS.');
+  }
+  const countText = Number.isInteger(employeeCount) && employeeCount > 0
+    ? `Lo ideal es que participen las ${employeeCount.toLocaleString('es-CO')} personas de la empresa.`
+    : 'Lo ideal es que participe todo el equipo de la empresa.';
+  const content = stage === 24
+    ? {
+        subject: '¿Pudiste compartir el enlace con tu equipo?',
+        paragraphs: [
+          `Hola, ${name}:`,
+          `Ya tenemos tu mirada sobre la cultura de ${company}. Ahora queremos escuchar cómo la vive tu equipo.`,
+          countText,
+          'Puedes compartirles este enlace por WhatsApp, correo o el canal que usen habitualmente:',
+          url?.href || '',
+          'Si algo te ha impedido avanzar, responde este correo y te ayudamos.',
+          'El equipo de TaleX',
+        ],
+        cta: 'Copiar el enlace para mi equipo',
+      }
+    : stage === 48
+      ? {
+          subject: `${name}, ¿te ayudamos a dar el siguiente paso?`,
+          paragraphs: [
+            `Hola, ${name}:`,
+            'Sabemos que entre reuniones y pendientes estas cosas pueden quedarse para después.',
+            `Si todavía quieres conocer cómo vive tu equipo la cultura de ${company}, aún puedes compartirles el diagnóstico. Cada persona responde por su cuenta y sin crear una cuenta.`,
+            url?.href || '',
+            '¿Tienes alguna duda antes de enviarlo? Puedes responder este correo; estamos para ayudarte.',
+            'El equipo de TaleX',
+          ],
+          cta: 'Compartir el diagnóstico con mi equipo',
+        }
+      : stage === 72
+        ? {
+            subject: `Dejamos la puerta abierta, ${name}`,
+            paragraphs: [
+              `Hola, ${name}:`,
+              `Nos habría encantado acompañarte a conocer mejor la cultura de ${company} y escuchar a las personas que la construyen contigo.`,
+              'Entendemos que quizá este no sea el momento. Gracias por habernos contado un poco sobre tu empresa y por considerar a TaleX.',
+              'Ojalá podamos trabajar juntos cuando sea un buen momento para ustedes.',
+              'Un abrazo,',
+              'El equipo de TaleX',
+            ],
+          }
+        : null;
+  if (!content) throw new Error('Etapa de recordatorio inválida.');
+
+  const text = content.paragraphs.filter(Boolean).join('\n\n');
+  const button = content.cta && url
+    ? `<p style="margin:24px 0;"><a href="${escapeHtml(url.href)}" style="display:inline-block;background:#0b1528;color:#fff;text-decoration:none;padding:14px 22px;border-radius:8px;font-weight:700;">${escapeHtml(content.cta)}</a></p>`
+    : '';
+  const htmlParagraphs = content.paragraphs
+    .filter(Boolean)
+    .map((paragraph) => `<p style="margin:0 0 16px;font-size:15px;line-height:1.7;color:#344054;">${escapeHtml(paragraph)}</p>`)
+    .join('');
+  const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(content.subject)}</title></head><body style="margin:0;padding:24px;background:#fff;font-family:Arial,Helvetica,sans-serif;color:#0b1528;"><main style="max-width:560px;margin:0 auto;"><p style="margin:0 0 24px;font-size:20px;font-weight:700;color:#0b1528;">TaleX</p>${htmlParagraphs}${button}</main></body></html>`;
+  return {subject: content.subject, text, html};
 }
 
 export function cultureReportPdfEmail({companyName, contactName, coverage, titular}) {

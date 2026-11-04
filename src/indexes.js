@@ -81,6 +81,7 @@ const INDEXES = {
   ],
   culture_leads: [
     [{email: 1, created_at: -1}],
+    [{email_status: 1, delivery_policy: 1, survey_sent_at: 1}],
     [{status: 1, created_at: -1}],
     [{organization_id: 1}],
     [{created_at: -1}],

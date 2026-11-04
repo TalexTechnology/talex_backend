@@ -96,6 +96,6 @@ export async function submitCultureSurvey(organizationId, body, {baseUrl} = {}) 
 async function assertSurveyOpen(organizationId) {
   const report = await findOne('culture_reports', {organization_id: organizationId});
   if (report?.auto_send_at && new Date(report.auto_send_at).getTime() <= Date.now()) {
-    throw new ApiError(410, 'survey_closed', 'El plazo de 24 horas terminó. El informe se prepara con las respuestas recibidas hasta el cierre.');
+    throw new ApiError(410, 'survey_closed', 'El plazo para responder terminó. El informe se prepara con las respuestas recibidas hasta el cierre.');
   }
 }
