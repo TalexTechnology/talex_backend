@@ -81,7 +81,7 @@ export function cultureShareEmail({
     : 'Descubre la cultura que vive tu equipo';
 
   const preheader =
-    'Invita a todo tu equipo. En 72 horas recibirás el resultado con las respuestas recibidas.';
+    'Invita a todo tu equipo y conoce cómo vive la cultura de tu empresa.';
 
   const text = [
     `Hola ${name},`,
@@ -105,7 +105,7 @@ export function cultureShareEmail({
     '',
     `3. Invita a todo tu equipo. ${teamInvitation}`,
     '',
-    'Tu equipo tiene 72 horas para responder a partir del envío de este correo. Al cumplirse el plazo, te enviaremos el resultado con las respuestas recibidas. Si nadie responde, recibirás un informe que indique que no hay datos para analizar. La profundidad del informe dependerá de la cantidad de respuestas; con pocos datos, será una lectura limitada y te indicaremos qué información falta.',
+    'Comparte el enlace con tu equipo para que cada persona pueda responder. Al finalizar el período de participación, te enviaremos el resultado con las respuestas recibidas. Si nadie responde, recibirás un informe que indique que no hay datos para analizar. La profundidad del informe dependerá de la cantidad de respuestas; con pocos datos, será una lectura limitada y te indicaremos qué información falta.',
     '',
     'Puedes copiar el enlace y compartirlo por correo, WhatsApp o el canal que use tu equipo. Reenvíalo como recordatorio a quienes aún no hayan completado la encuesta.',
     '',
@@ -237,10 +237,10 @@ export function cultureShareEmail({
                 <tr>
                   <td style="padding:18px 20px;">
                     <p style="margin:0 0 8px;font-size:15px;font-weight:700;line-height:1.7;color:#0b1528;">
-                      Tienen 72 horas para responder desde el envío de este correo.
+                      Comparte el enlace con tu equipo para que cada persona pueda responder.
                     </p>
                     <p style="margin:0 0 8px;font-size:15px;font-weight:700;line-height:1.7;color:#0b1528;">
-                      Al cumplirse las 72 horas, te enviaremos el resultado con las respuestas recibidas.
+                      Al finalizar el período de participación, te enviaremos el resultado con las respuestas recibidas.
                     </p>
                     <p style="margin:0;font-size:13px;line-height:1.7;color:#596779;">
                       Si nadie responde, el informe indicará que no hay datos para analizar. La profundidad dependerá de cuántas personas participen; con pocos datos, será una lectura limitada y te indicaremos qué información falta.
@@ -355,10 +355,13 @@ export function cultureReminderEmail({stage, contactName, companyName, surveyUrl
               `Hola, ${name}:`,
               `Nos habría encantado acompañarte a conocer mejor la cultura de ${company} y escuchar a las personas que la construyen contigo.`,
               'Entendemos que quizá este no sea el momento. Gracias por habernos contado un poco sobre tu empresa y por considerar a TaleX.',
+              'Si aún quieres continuar, tienes 24 horas más para compartir el enlace y que tu equipo responda. Después te enviaremos el resultado con la información disponible, aunque nadie haya respondido.',
+              url?.href || '',
               'Ojalá podamos trabajar juntos cuando sea un buen momento para ustedes.',
               'Un abrazo,',
               'El equipo de TaleX',
             ],
+            cta: 'Compartir el diagnóstico con mi equipo',
           }
         : null;
   if (!content) throw new Error('Etapa de recordatorio inválida.');
@@ -481,7 +484,7 @@ export function cultureReportReadyEmail({companyName, contactName, reportUrl, co
     `Hola ${name},`,
     '',
     `Se recibieron ${respondents} respuestas del equipo.`,
-    'Puedes consultar el estado de tu diagnóstico cultural aquí. El resultado se enviará por correo al cumplirse las 24 horas de participación:',
+    'Puedes consultar el estado de tu diagnóstico cultural aquí. El resultado se enviará por correo al finalizar el período de participación:',
     '',
     reportUrl,
   ].join('\n');
@@ -504,7 +507,7 @@ export function cultureReportReadyEmail({companyName, contactName, reportUrl, co
               Se recibieron <strong>${respondents} respuestas del equipo</strong>.
             </p>
             <p style="margin:0 0 28px;font-size:16px;line-height:1.6;color:#3d4550;">
-              Puedes consultar el estado de tu diagnóstico cultural aquí. El resultado se enviará por correo al cumplirse las 24 horas de participación.
+              Puedes consultar el estado de tu diagnóstico cultural aquí. El resultado se enviará por correo al finalizar el período de participación.
             </p>
             <p style="margin:0 0 28px;">
               <a href="${escapeHtml(reportUrl)}"

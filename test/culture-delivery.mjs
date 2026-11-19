@@ -8,7 +8,8 @@ const {createCultureLead} = await import('../src/application/culture-leads.js');
 const {maybeReleaseCultureReport} = await import('../src/application/culture-report.js');
 const {releaseDueCultureReports} = await import('../src/application/culture-report-auto.js');
 const {getCultureSurvey, submitCultureSurvey} = await import('../src/application/culture-survey.js');
-const {belowReminderParticipationThreshold, cultureReminderStage} = await import('../src/application/culture-report-auto.js');
+const {cultureFollowupSchedule, FOLLOWUP_DAY_MS: DAY} = await import('../src/application/culture-followup.js');
+const {confirmCultureShared} = await import('../src/application/culture-tracking.js');
 const {connectDatabase, closeDatabase, collection} = await import('../src/db.js');
 const {findOne, updateOne} = await import('../src/domain/store.js');
 
@@ -19,7 +20,8 @@ for (const count of [20, 1000, undefined]) {
   });
   for (const body of [mail.text, mail.html]) {
     assert.doesNotMatch(body, /384|fórmula|umbral|mínimo|1 a 50|1 – 50|alcanzar ese/i);
-    assert.match(body, /72 horas/);
+    assert.doesNotMatch(body, /72 horas/);
+    assert.match(body, /período de participación/);
     assert.match(body, /respuestas recibidas/);
     if (count === 20) assert.match(body, /20 personas/);
   }
@@ -33,7 +35,7 @@ const reminder48 = cultureReminderEmail({
   stage: 48, contactName: 'Contacto', companyName: 'Empresa',
   surveyUrl: 'https://platform.talex.com.co/cultura/test',
 });
-const reminder72 = cultureReminderEmail({stage: 72, contactName: 'Contacto', companyName: 'Empresa'});
+const reminder72 = cultureReminderEmail({stage: 72, contactName: 'Contacto', companyName: 'Empresa', surveyUrl: 'https://platform.talex.com.co/cultura/test'});
 assert.equal(reminder24.subject, '¿Pudiste compartir el enlace con tu equipo?');
 assert.match(reminder24.text, /20 personas/);
 assert.match(reminder24.html, /Copiar el enlace para mi equipo/);
@@ -43,12 +45,33 @@ assert.match(reminder72.subject, /Dejamos la puerta abierta/);
 for (const reminder of [reminder24, reminder48, reminder72]) {
   assert.doesNotMatch(reminder.text + reminder.html, /50%|mitad|umbral/i);
 }
-assert.equal(cultureReminderStage(23.99), null);
-assert.equal(cultureReminderStage(24), 24);
-assert.equal(cultureReminderStage(48), 48);
-assert.equal(cultureReminderStage(72), 72);
-assert.equal(belowReminderParticipationThreshold(9, 20), true);
-assert.equal(belowReminderParticipationThreshold(10, 20), false);
+assert.match(reminder72.text, /24 horas más/);
+assert.match(reminder72.html, /Compartir el diagnóstico/);
+const invited = new Date('2026-11-01T10:00:00Z');
+const clock = new Date(invited.getTime() + 80 * 3600000);
+const planLead = {survey_sent_at: invited};
+let plan = cultureFollowupSchedule(planLead, {now: clock});
+assert.equal(plan.nextReminder.stage, 24); // Un proceso atrasado no salta al tercero.
+assert.equal(plan.sendAt.getTime(), invited.getTime() + 4 * DAY);
+planLead.reminder_24_status = 'sent';
+planLead.reminder_24_sent_at = clock;
+plan = cultureFollowupSchedule(planLead, {now: clock});
+assert.equal(plan.nextReminder.stage, 48);
+assert.equal(plan.nextReminder.dueAt.getTime(), clock.getTime() + DAY);
+assert.equal(plan.sendAt.getTime(), clock.getTime() + 3 * DAY);
+planLead.reminder_48_status = 'sent';
+planLead.reminder_48_sent_at = new Date(clock.getTime() + DAY);
+plan = cultureFollowupSchedule(planLead, {now: clock});
+assert.equal(plan.nextReminder.stage, 72);
+assert.equal(plan.nextReminder.dueAt.getTime(), clock.getTime() + 2 * DAY);
+planLead.reminder_72_status = 'sent';
+planLead.reminder_72_sent_at = new Date(clock.getTime() + 2 * DAY);
+plan = cultureFollowupSchedule(planLead, {now: clock});
+assert.equal(plan.nextReminder, null);
+assert.equal(plan.sendAt.getTime(), clock.getTime() + 3 * DAY);
+plan = cultureFollowupSchedule(planLead, {confirmedAt: clock, now: clock});
+assert.equal(plan.nextReminder, null);
+assert.equal(plan.sendAt.getTime(), clock.getTime() + DAY);
 const empty = cultureReportPdfEmail({companyName: 'Empresa', coverage: {respondents: 0, reached: false}});
 assert.match(empty.text, /ausencia de respuestas/);
 assert.doesNotMatch(empty.html, /contrasta lo que viven/);
@@ -78,22 +101,39 @@ try {
   let report = await findOne('culture_reports', {organization_id: lead.organizationId});
   assert.equal(report.coverage.respondents, 0);
   assert.equal(report.auto_send_status, 'pending');
-  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), 72 * 3600000);
+  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), 96 * 3600000);
   await updateOne('culture_leads', {organization_id: lead.organizationId}, {delivery_policy: 'fixed_24h'});
   await updateOne('culture_reports', {id: report.id}, {
     auto_send_at: new Date(report.survey_sent_at.getTime() + 24 * 3600000),
   });
   await releaseDueCultureReports();
   report = await findOne('culture_reports', {id: report.id});
-  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), 72 * 3600000);
-  assert.equal((await findOne('culture_leads', {organization_id: lead.organizationId})).delivery_policy, 'fixed_72h');
+  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), 96 * 3600000);
+  assert.equal((await findOne('culture_leads', {organization_id: lead.organizationId})).delivery_policy, 'reminders_24h_v2');
   const deadline = report.auto_send_at.getTime();
   const org = await findOne('organizations', {id: lead.organizationId});
   await maybeReleaseCultureReport(org);
   report = await findOne('culture_reports', {id: report.id});
   assert.equal(report.auto_send_at.getTime(), deadline);
   assert.equal((await releaseDueCultureReports()).checked, 0);
-  await updateOne('culture_reports', {id: report.id}, {auto_send_at: new Date(Date.now() - 1000)});
+  await updateOne('culture_leads', {id: lead.id}, {
+    email_status: 'sent', survey_sent_at: new Date(Date.now() - 80 * 3600000),
+  });
+  let previewReminders = await releaseDueCultureReports({dryRun: true});
+  assert.equal(previewReminders.reminders[0].stage, 24);
+  const lastReminderAt = new Date(Date.now() - 3600000);
+  await updateOne('culture_leads', {id: lead.id}, {
+    reminder_24_status: 'sent', reminder_24_sent_at: new Date(lastReminderAt.getTime() - 2 * DAY),
+    reminder_48_status: 'sent', reminder_48_sent_at: new Date(lastReminderAt.getTime() - DAY),
+    reminder_72_status: 'sent', reminder_72_sent_at: lastReminderAt,
+  });
+  await releaseDueCultureReports();
+  report = await findOne('culture_reports', {id: report.id});
+  assert.equal(report.auto_send_at.getTime(), lastReminderAt.getTime() + DAY);
+  await getCultureSurvey(org.id); // El tercero no cierra la encuesta.
+  assert.equal((await releaseDueCultureReports({dryRun: true})).checked, 0);
+  await updateOne('culture_leads', {id: lead.id}, {reminder_72_sent_at: new Date(Date.now() - DAY - 1000)});
+  await maybeReleaseCultureReport(org);
   const preview = await releaseDueCultureReports({dryRun: true});
   assert.equal(preview.checked, 1);
   assert.deepEqual(preview.results, []);
@@ -115,7 +155,14 @@ try {
   assert.equal(await collection('culture_report_files').countDocuments({organization_id: org.id}), 2);
   await updateOne('culture_reports', {id: report.id}, {auto_send_attempts: 5});
   assert.equal((await releaseDueCultureReports({dryRun: true})).checked, 0);
-  console.log('PASS 72h scheduling without responses, stable deadline, closed survey, empty PDF, concurrent delivery and SMTP retry');
+  const confirmationAt = new Date();
+  await confirmCultureShared(org.id, {shareToken: lead.shareToken});
+  const sharing = await findOne('culture_sharing', {organization_id: org.id});
+  report = await findOne('culture_reports', {id: report.id});
+  assert.ok(sharing.confirmed_at >= confirmationAt);
+  assert.equal(report.auto_send_at.getTime(), sharing.confirmed_at.getTime() + DAY);
+  assert.deepEqual((await releaseDueCultureReports({dryRun: true})).reminders, []);
+  console.log('PASS sequential reminders, final 24h grace, confirmation stops reminders, empty PDF, concurrent delivery and SMTP retry');
 } finally {
   if (db?.databaseName.startsWith('test_culture_delivery_')) await db.dropDatabase();
   await closeDatabase();

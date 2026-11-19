@@ -251,7 +251,7 @@ export async function createCultureLead(body, {baseUrl} = {}) {
     user_agent: lead.userAgent,
     survey_url: surveyUrl,
     email_status: 'pending',
-    delivery_policy: 'fixed_72h',
+    delivery_policy: 'reminders_24h_v2',
     source: 'mi-cultura',
     status: 'new',
     responded_at: now,

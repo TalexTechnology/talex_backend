@@ -1,3 +1,4 @@
+import {CULTURE_FOLLOWUP_POLICY, cultureFollowupSchedule} from './culture-followup.js';
 import {randomUUID} from 'node:crypto';
 import {count, findMany, findOne, insertOne, updateOne} from '../domain/store.js';
 import {config} from '../config.js';
@@ -222,10 +223,6 @@ export function renderCultureReportPage(organizationId) {
   return cultureReportPageHtml(organizationId);
 }
 
-function delayMs() {
-  return 72 * 60 * 60 * 1000;
-}
-
 function alreadyAutoSent(report) {
   return (
     report?.auto_send_status === 'sent' ||
@@ -241,17 +238,21 @@ export async function maybeReleaseCultureReport(organization) {
   if (alreadyAutoSent(existing)) return existing;
   const now = new Date();
   const lead = await findOne('culture_leads', {
-    organization_id: organization.id, delivery_policy: 'fixed_72h',
+    organization_id: organization.id, delivery_policy: CULTURE_FOLLOWUP_POLICY,
   }, {created_at: -1}) || await leadFor(organization.id);
   const invitedAt = new Date(lead?.survey_sent_at || lead?.created_at || now);
-  const expectedSendAt = new Date(invitedAt.getTime() + delayMs());
+  const sharing = await findOne('culture_sharing', {organization_id: organization.id});
+  const schedule = cultureFollowupSchedule(lead, {confirmedAt: sharing?.confirmed_at, now});
+  if (!schedule) return existing;
+  const expectedSendAt = schedule.sendAt;
   if (existing?.auto_send_at) {
     if (
       ['pending', 'failed'].includes(existing.auto_send_status) &&
-      new Date(existing.auto_send_at).getTime() < expectedSendAt.getTime()
+      new Date(existing.auto_send_at).getTime() !== expectedSendAt.getTime()
     ) {
       return updateOne('culture_reports', {id: existing.id}, {
         auto_send_at: expectedSendAt,
+        followup_lead_id: lead.id,
         updated_at: now,
       });
     }
@@ -264,6 +265,7 @@ export async function maybeReleaseCultureReport(organization) {
     threshold_reached_at: snapshot.coverage.reached ? now : null,
     survey_sent_at: invitedAt,
     auto_send_at: expectedSendAt,
+    followup_lead_id: lead.id,
     auto_send_status: 'pending',
     auto_send_attempts: 0,
     updated_at: now,

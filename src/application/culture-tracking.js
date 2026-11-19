@@ -2,6 +2,7 @@ import {connectDatabase, collection, driverOptions} from '../db.js';
 import {findOne, insertOne} from '../domain/store.js';
 import {randomToken, sha256Hex} from '../domain/crypto.js';
 import {ApiError} from '../http.js';
+import {maybeReleaseCultureReport} from './culture-report.js';
 
 export async function createShareKey(organizationId) {
   const token = randomToken();
@@ -26,6 +27,8 @@ export async function confirmCultureShared(organizationId, body) {
     {$setOnInsert: {organization_id: organizationId, confirmed_at: new Date()}},
     {...driverOptions(), upsert: true},
   );
+  const organization = await findOne('organizations', {id: organizationId});
+  if (organization) await maybeReleaseCultureReport(organization);
   return {success: true};
 }
 

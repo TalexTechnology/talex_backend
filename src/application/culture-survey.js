@@ -3,6 +3,7 @@ import {findMany, findOne, insertOne} from '../domain/store.js';
 import {ApiError} from '../http.js';
 import {maybeReleaseCultureReport} from './culture-report.js';
 import {releaseDueCultureReports} from './culture-report-auto.js';
+import {cultureFollowupSchedule} from './culture-followup.js';
 import {
   EMPLOYEE_CULTURE_BANK,
   loadCompanyCultureQuestions,
@@ -95,7 +96,11 @@ export async function submitCultureSurvey(organizationId, body, {baseUrl} = {}) 
 
 async function assertSurveyOpen(organizationId) {
   const report = await findOne('culture_reports', {organization_id: organizationId});
-  if (report?.auto_send_at && new Date(report.auto_send_at).getTime() <= Date.now()) {
+  const lead = report?.followup_lead_id ? await findOne('culture_leads', {id: report.followup_lead_id}) : null;
+  const sharing = lead ? await findOne('culture_sharing', {organization_id: organizationId}) : null;
+  const schedule = lead ? cultureFollowupSchedule(lead, {confirmedAt: sharing?.confirmed_at}) : null;
+  const deadline = schedule?.sendAt || report?.auto_send_at;
+  if (report?.pdf_sent_at || report?.auto_send_status === 'sent' || (deadline && new Date(deadline).getTime() <= Date.now())) {
     throw new ApiError(410, 'survey_closed', 'El plazo para responder terminó. El informe se prepara con las respuestas recibidas hasta el cierre.');
   }
 }

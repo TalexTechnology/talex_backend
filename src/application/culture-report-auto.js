@@ -2,7 +2,7 @@ import {findMany, findOne, updateOne} from '../domain/store.js';
 import {parseEmployeeCount, parsePlantilla} from '../domain/culture-model.js';
 import {publishCultureReportPdf} from './culture-report-send.js';
 import {connectDatabase, collection, driverOptions} from '../db.js';
-import {cultureCoverage} from './culture-report.js';
+import {CULTURE_FOLLOWUP_POLICY, cultureFollowupSchedule} from './culture-followup.js';
 import {cultureReminderEmail, sendMail, smtpReady} from '../mail.js';
 
 export const CULTURE_AUTO_ACTOR = {
@@ -38,17 +38,6 @@ async function headcountFor(organization, lead) {
   return {employeeCount, plantilla};
 }
 
-export function cultureReminderStage(elapsedHours) {
-  if (!Number.isFinite(elapsedHours) || elapsedHours < 24) return null;
-  if (elapsedHours >= 72) return 72;
-  if (elapsedHours >= 48) return 48;
-  return 24;
-}
-
-export function belowReminderParticipationThreshold(respondents, headcount) {
-  return Number.isFinite(respondents) && Number.isFinite(headcount) && headcount > 0 && respondents * 2 < headcount;
-}
-
 async function extendPendingCultureDeadlines() {
   const pendingReports = await findMany('culture_reports', {
     auto_send_at: {$exists: true},
@@ -57,24 +46,20 @@ async function extendPendingCultureDeadlines() {
     pdf_email_status: {$ne: 'sent'},
   }, {limit: 5000});
   for (const report of pendingReports) {
-    const lead = await findOne('culture_leads', {
-      organization_id: report.organization_id,
-      delivery_policy: 'fixed_24h',
-    }, {created_at: -1}) || await leadFor(report.organization_id);
+    const lead = (report.followup_lead_id ? await findOne('culture_leads', {id: report.followup_lead_id}) : null)
+      || await findOne('culture_leads', {organization_id: report.organization_id}, {created_at: -1});
     if (!lead) continue;
-    const invitedAt = new Date(report.survey_sent_at || lead.survey_sent_at || lead.created_at);
-    if (!Number.isFinite(invitedAt.getTime())) continue;
-    const expectedSendAt = new Date(invitedAt.getTime() + 72 * 3600000);
-    if (new Date(report.auto_send_at).getTime() < expectedSendAt.getTime()) {
+    const sharing = await findOne('culture_sharing', {organization_id: report.organization_id});
+    const schedule = cultureFollowupSchedule(lead, {confirmedAt: sharing?.confirmed_at});
+    if (!schedule) continue;
+    if (new Date(report.auto_send_at).getTime() !== schedule.sendAt.getTime() || report.followup_lead_id !== lead.id) {
       await updateOne('culture_reports', {id: report.id}, {
-        auto_send_at: expectedSendAt,
-        updated_at: new Date(),
+        auto_send_at: schedule.sendAt, followup_lead_id: lead.id, updated_at: new Date(),
       });
     }
-    if (lead.delivery_policy !== 'fixed_72h') {
+    if (lead.delivery_policy !== CULTURE_FOLLOWUP_POLICY) {
       await updateOne('culture_leads', {id: lead.id}, {
-        delivery_policy: 'fixed_72h',
-        updated_at: new Date(),
+        delivery_policy: CULTURE_FOLLOWUP_POLICY, updated_at: new Date(),
       });
     }
   }
@@ -83,23 +68,20 @@ async function extendPendingCultureDeadlines() {
 async function sendDueCultureReminders(now, {dryRun = false} = {}) {
   const leads = await findMany('culture_leads', {
     email_status: 'sent',
-    delivery_policy: 'fixed_72h',
+    delivery_policy: CULTURE_FOLLOWUP_POLICY,
     survey_sent_at: {$lte: new Date(now.getTime() - 24 * 3600000)},
   }, {sort: {survey_sent_at: 1}, limit: 500});
   const outcomes = [];
   for (const lead of leads) {
-    const sentAt = new Date(lead.survey_sent_at).getTime();
-    const stage = cultureReminderStage((now.getTime() - sentAt) / 3600000);
-    if (!stage) continue;
+    const report = await findOne('culture_reports', {organization_id: lead.organization_id});
+    if (!report || alreadySent(report) || report.followup_lead_id !== lead.id) continue;
+    const sharing = await findOne('culture_sharing', {organization_id: lead.organization_id});
+    const schedule = cultureFollowupSchedule(lead, {confirmedAt: sharing?.confirmed_at, now});
+    const next = schedule?.nextReminder;
+    if (!next || next.dueAt > now) continue;
+    const stage = next.stage;
     const statusField = `reminder_${stage}_status`;
     const leaseField = `reminder_${stage}_lease_until`;
-    if (lead[statusField] === 'sent') continue;
-    const snapshot = await cultureCoverage(lead.organization_id);
-    if (!snapshot) continue;
-    const headcount = parseEmployeeCount(
-      lead.employee_count ?? snapshot.organization.employee_count,
-    ) || snapshot.coverage.estimatedHeadcount;
-    if (!belowReminderParticipationThreshold(snapshot.coverage.respondents, headcount)) continue;
     if (dryRun) {
       outcomes.push({stage, status: 'would_send'});
       continue;
@@ -124,6 +106,11 @@ async function sendDueCultureReminders(now, {dryRun = false} = {}) {
       updated_at: now,
     }}, {...driverOptions(), returnDocument: 'after'});
     if (!claimed) continue;
+
+    if (await findOne('culture_sharing', {organization_id: lead.organization_id})) {
+      await updateOne('culture_leads', {id: lead.id}, {[statusField]: 'cancelled', [leaseField]: null});
+      continue;
+    }
 
     try {
       const email = cultureReminderEmail({
@@ -160,6 +147,7 @@ export async function releaseDueCultureReports({baseUrl, dryRun = false} = {}) {
   const now = new Date();
   if (!dryRun) await extendPendingCultureDeadlines();
   const reminders = await sendDueCultureReminders(now, {dryRun});
+  if (!dryRun) await extendPendingCultureDeadlines();
   const due = await findMany('culture_reports', {
     auto_send_at: {$lte: now},
     auto_send_status: {$in: ['pending', 'failed']},
@@ -235,7 +223,8 @@ export async function releaseDueCultureReports({baseUrl, dryRun = false} = {}) {
   const reminderFailures = reminders.filter((item) => item.status === 'failed').length;
   return {
     ok: true,
-    delayHours: 72,
+    followupIntervalHours: 24,
+    graceAfterLastReminderHours: 24,
     checked: due.length,
     results,
     reminders,
