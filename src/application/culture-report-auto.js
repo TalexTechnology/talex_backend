@@ -2,7 +2,7 @@ import {findMany, findOne, updateOne} from '../domain/store.js';
 import {parseEmployeeCount, parsePlantilla} from '../domain/culture-model.js';
 import {publishCultureReportPdf} from './culture-report-send.js';
 import {connectDatabase, collection, driverOptions} from '../db.js';
-import {CULTURE_FOLLOWUP_POLICY, cultureFollowupSchedule} from './culture-followup.js';
+import {CULTURE_FOLLOWUP_POLICY, cultureFollowupSchedule, isCultureBusinessDay} from './culture-followup.js';
 import {cultureReminderEmail, sendMail, smtpReady} from '../mail.js';
 
 export const CULTURE_AUTO_ACTOR = {
@@ -143,8 +143,10 @@ async function sendDueCultureReminders(now, {dryRun = false} = {}) {
   return outcomes;
 }
 
-export async function releaseDueCultureReports({baseUrl, dryRun = false} = {}) {
-  const now = new Date();
+export async function releaseDueCultureReports({baseUrl, dryRun = false, now = new Date()} = {}) {
+  if (!isCultureBusinessDay(now)) {
+    return {ok: true, checked: 0, results: [], reminders: [], reminderFailures: 0, skipped: 'weekend', dryRun};
+  }
   if (!dryRun) await extendPendingCultureDeadlines();
   const reminders = await sendDueCultureReminders(now, {dryRun});
   if (!dryRun) await extendPendingCultureDeadlines();

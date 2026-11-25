@@ -8,7 +8,7 @@ const {createCultureLead} = await import('../src/application/culture-leads.js');
 const {maybeReleaseCultureReport} = await import('../src/application/culture-report.js');
 const {releaseDueCultureReports} = await import('../src/application/culture-report-auto.js');
 const {getCultureSurvey, submitCultureSurvey} = await import('../src/application/culture-survey.js');
-const {cultureFollowupSchedule, FOLLOWUP_DAY_MS: DAY} = await import('../src/application/culture-followup.js');
+const {cultureFollowupSchedule, addCultureBusinessDays, FOLLOWUP_DAY_MS: DAY} = await import('../src/application/culture-followup.js');
 const {confirmCultureShared} = await import('../src/application/culture-tracking.js');
 const {connectDatabase, closeDatabase, collection} = await import('../src/db.js');
 const {findOne, updateOne} = await import('../src/domain/store.js');
@@ -45,33 +45,33 @@ assert.match(reminder72.subject, /Dejamos la puerta abierta/);
 for (const reminder of [reminder24, reminder48, reminder72]) {
   assert.doesNotMatch(reminder.text + reminder.html, /50%|mitad|umbral/i);
 }
-assert.match(reminder72.text, /24 horas más/);
+assert.match(reminder72.text, /un día hábil más/);
 assert.match(reminder72.html, /Compartir el diagnóstico/);
-const invited = new Date('2026-11-01T10:00:00Z');
+const invited = new Date('2026-11-02T10:00:00Z');
 const clock = new Date(invited.getTime() + 80 * 3600000);
 const planLead = {survey_sent_at: invited};
 let plan = cultureFollowupSchedule(planLead, {now: clock});
 assert.equal(plan.nextReminder.stage, 24); // Un proceso atrasado no salta al tercero.
-assert.equal(plan.sendAt.getTime(), invited.getTime() + 4 * DAY);
+assert.equal(plan.sendAt.getTime(), addCultureBusinessDays(invited, 4).getTime());
 planLead.reminder_24_status = 'sent';
 planLead.reminder_24_sent_at = clock;
 plan = cultureFollowupSchedule(planLead, {now: clock});
 assert.equal(plan.nextReminder.stage, 48);
-assert.equal(plan.nextReminder.dueAt.getTime(), clock.getTime() + DAY);
-assert.equal(plan.sendAt.getTime(), clock.getTime() + 3 * DAY);
+assert.equal(plan.nextReminder.dueAt.getTime(), addCultureBusinessDays(clock).getTime());
+assert.equal(plan.sendAt.getTime(), addCultureBusinessDays(clock, 3).getTime());
 planLead.reminder_48_status = 'sent';
-planLead.reminder_48_sent_at = new Date(clock.getTime() + DAY);
+planLead.reminder_48_sent_at = new Date(addCultureBusinessDays(clock).getTime());
 plan = cultureFollowupSchedule(planLead, {now: clock});
 assert.equal(plan.nextReminder.stage, 72);
-assert.equal(plan.nextReminder.dueAt.getTime(), clock.getTime() + 2 * DAY);
+assert.equal(plan.nextReminder.dueAt.getTime(), addCultureBusinessDays(clock, 2).getTime());
 planLead.reminder_72_status = 'sent';
-planLead.reminder_72_sent_at = new Date(clock.getTime() + 2 * DAY);
+planLead.reminder_72_sent_at = new Date(addCultureBusinessDays(clock, 2).getTime());
 plan = cultureFollowupSchedule(planLead, {now: clock});
 assert.equal(plan.nextReminder, null);
-assert.equal(plan.sendAt.getTime(), clock.getTime() + 3 * DAY);
+assert.equal(plan.sendAt.getTime(), addCultureBusinessDays(clock, 3).getTime());
 plan = cultureFollowupSchedule(planLead, {confirmedAt: clock, now: clock});
 assert.equal(plan.nextReminder, null);
-assert.equal(plan.sendAt.getTime(), clock.getTime() + DAY);
+assert.equal(plan.sendAt.getTime(), addCultureBusinessDays(clock).getTime());
 const empty = cultureReportPdfEmail({companyName: 'Empresa', coverage: {respondents: 0, reached: false}});
 assert.match(empty.text, /ausencia de respuestas/);
 assert.doesNotMatch(empty.html, /contrasta lo que viven/);
@@ -101,15 +101,15 @@ try {
   let report = await findOne('culture_reports', {organization_id: lead.organizationId});
   assert.equal(report.coverage.respondents, 0);
   assert.equal(report.auto_send_status, 'pending');
-  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), 96 * 3600000);
+  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), addCultureBusinessDays(report.survey_sent_at, 4).getTime() - report.survey_sent_at.getTime());
   await updateOne('culture_leads', {organization_id: lead.organizationId}, {delivery_policy: 'fixed_24h'});
   await updateOne('culture_reports', {id: report.id}, {
     auto_send_at: new Date(report.survey_sent_at.getTime() + 24 * 3600000),
   });
   await releaseDueCultureReports();
   report = await findOne('culture_reports', {id: report.id});
-  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), 96 * 3600000);
-  assert.equal((await findOne('culture_leads', {organization_id: lead.organizationId})).delivery_policy, 'reminders_24h_v2');
+  assert.equal(report.auto_send_at.getTime() - report.survey_sent_at.getTime(), addCultureBusinessDays(report.survey_sent_at, 4).getTime() - report.survey_sent_at.getTime());
+  assert.equal((await findOne('culture_leads', {organization_id: lead.organizationId})).delivery_policy, 'reminders_weekdays_v3');
   const deadline = report.auto_send_at.getTime();
   const org = await findOne('organizations', {id: lead.organizationId});
   await maybeReleaseCultureReport(org);
@@ -129,7 +129,7 @@ try {
   });
   await releaseDueCultureReports();
   report = await findOne('culture_reports', {id: report.id});
-  assert.equal(report.auto_send_at.getTime(), lastReminderAt.getTime() + DAY);
+  assert.equal(report.auto_send_at.getTime(), addCultureBusinessDays(lastReminderAt).getTime());
   await getCultureSurvey(org.id); // El tercero no cierra la encuesta.
   assert.equal((await releaseDueCultureReports({dryRun: true})).checked, 0);
   await updateOne('culture_leads', {id: lead.id}, {reminder_72_sent_at: new Date(Date.now() - DAY - 1000)});
@@ -160,7 +160,7 @@ try {
   const sharing = await findOne('culture_sharing', {organization_id: org.id});
   report = await findOne('culture_reports', {id: report.id});
   assert.ok(sharing.confirmed_at >= confirmationAt);
-  assert.equal(report.auto_send_at.getTime(), sharing.confirmed_at.getTime() + DAY);
+  assert.equal(report.auto_send_at.getTime(), addCultureBusinessDays(sharing.confirmed_at).getTime());
   assert.deepEqual((await releaseDueCultureReports({dryRun: true})).reminders, []);
   console.log('PASS sequential reminders, final 24h grace, confirmation stops reminders, empty PDF, concurrent delivery and SMTP retry');
 } finally {

@@ -107,6 +107,8 @@ export function cultureShareEmail({
     '',
     'Comparte el enlace con tu equipo para que cada persona pueda responder. Al finalizar el período de participación, te enviaremos el resultado con las respuestas recibidas. Si nadie responde, recibirás un informe que indique que no hay datos para analizar. La profundidad del informe dependerá de la cantidad de respuestas; con pocos datos, será una lectura limitada y te indicaremos qué información falta.',
     '',
+    'Los plazos y recordatorios cuentan solo de lunes a viernes, en la hora de Colombia.',
+    '',
     'Puedes copiar el enlace y compartirlo por correo, WhatsApp o el canal que use tu equipo. Reenvíalo como recordatorio a quienes aún no hayan completado la encuesta.',
     '',
     'La cultura se entiende mejor cuando escuchas al equipo.',
@@ -243,7 +245,7 @@ export function cultureShareEmail({
                       Al finalizar el período de participación, te enviaremos el resultado con las respuestas recibidas.
                     </p>
                     <p style="margin:0;font-size:13px;line-height:1.7;color:#596779;">
-                      Si nadie responde, el informe indicará que no hay datos para analizar. La profundidad dependerá de cuántas personas participen; con pocos datos, será una lectura limitada y te indicaremos qué información falta.
+                      Los plazos y recordatorios cuentan solo de lunes a viernes, en la hora de Colombia. Si nadie responde, el informe indicará que no hay datos para analizar. La profundidad dependerá de cuántas personas participen; con pocos datos, será una lectura limitada y te indicaremos qué información falta.
                     </p>
                   </td>
                 </tr>
@@ -355,7 +357,7 @@ export function cultureReminderEmail({stage, contactName, companyName, surveyUrl
               `Hola, ${name}:`,
               `Nos habría encantado acompañarte a conocer mejor la cultura de ${company} y escuchar a las personas que la construyen contigo.`,
               'Entendemos que quizá este no sea el momento. Gracias por habernos contado un poco sobre tu empresa y por considerar a TaleX.',
-              'Si aún quieres continuar, tienes 24 horas más para compartir el enlace y que tu equipo responda. Después te enviaremos el resultado con la información disponible, aunque nadie haya respondido.',
+              'Si aún quieres continuar, tienes un día hábil más, contado de lunes a viernes, para compartir el enlace y que tu equipo responda. Después te enviaremos el resultado con la información disponible, aunque nadie haya respondido.',
               url?.href || '',
               'Ojalá podamos trabajar juntos cuando sea un buen momento para ustedes.',
               'Un abrazo,',
