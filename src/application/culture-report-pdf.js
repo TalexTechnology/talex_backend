@@ -39,6 +39,22 @@ function textOf(value) {
     .trim();
 }
 
+function recommendationText(value) {
+  return String(value ?? '')
+    .replace(/Empleados\s*≥\s*(\d+)\s+y sello distinto de no_validada\./g,
+      (_, count) => `Se reúnen al menos ${count} respuestas de empleados y se valida el perfil cultural.`)
+    .replace('Empleados ≥ muestra requerida y sello distinto de no_validada.',
+      'Se reúnen las respuestas necesarias para validar el perfil cultural.')
+    .replace('Brechas críticas C01–C08 por debajo de 0,30.',
+      'Disminuyen las diferencias más marcadas entre liderazgo y equipo.')
+    .replace('Alinee el mensaje de atracción con la oferta que sí marcan los empleados en O01.',
+      'Ajusta el mensaje de atracción a lo que los empleados sí reconocen en su día a día.')
+    .replace('El anuncio de vacante cita solo necesidades con puntaje de empleados > 0.',
+      'El anuncio de la vacante menciona beneficios que los empleados reconocen en la práctica.')
+    .replace('Complete N, plantilla y más respuestas de empleados antes de sellar.',
+      'Completa el total de empleados, la distribución por áreas y las respuestas pendientes.');
+}
+
 function wrap(text, font, size, maxWidth) {
   const words = textOf(text).split(' ').filter(Boolean);
   if (!words.length) return [];
@@ -676,9 +692,9 @@ export async function renderCultureReportPdf({organizationName, informe, coverag
   if (informe?.recomendaciones?.length) {
     layout.title('Próximos pasos', 18);
     for (const item of informe.recomendaciones) {
-      const rows = wrap(item.accion, fonts.semi, 11, layout.width - 36);
+      const rows = wrap(recommendationText(item.accion), fonts.semi, 11, layout.width - 36);
       const meta = wrap(
-        [item.responsable_sugerido, item.plazo ? `En ${String(item.plazo).replace('_', ' ')}` : '', item.indicador_de_exito]
+        [item.responsable_sugerido, item.plazo ? `En ${String(item.plazo).replace('_', ' ').replace('dias', 'días')}` : '', recommendationText(item.indicador_de_exito)]
           .filter(Boolean)
           .join('  ·  '),
         fonts.regular,
@@ -698,11 +714,11 @@ export async function renderCultureReportPdf({organizationName, informe, coverag
         layout.text(fonts.regular, row, 9, MARGIN + 22, cursor, MUTED);
         cursor -= 12;
       }
-      layout.y = cursor - 10;
+      layout.y = cursor - 4;
     }
   }
 
-  layout.gap(8);
+  layout.gap(4);
   layout.body(`Corte ${informe?.empresa?.fecha_corte || 'hoy'}. Las respuestas son anónimas. TaleX no decide por nadie: informa para que una persona decida mejor.`);
   layout.finish(organizationName);
   return Buffer.from(await doc.save());

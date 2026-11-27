@@ -35,7 +35,7 @@ function blindSpots(perValue, leadersN) {
   if (leadersN < 1) {
     return [{
       descripcion: 'No hay respuestas de liderazgo para contrastar con lo que viven los empleados.',
-      evidencia: 'K02 no clasificó líderes (jefe o directivo) con perfil C01–C08.',
+      evidencia: 'No hubo suficientes respuestas de jefes o directivos para comparar sus percepciones.',
       impacto_en_contratacion: 'El perfil de referencia es solo el de empleados; no se puede advertir un relato oficial distinto.',
     }];
   }
@@ -113,7 +113,7 @@ export function buildCultureInforme(metrics) {
     20,
   );
   const limitaciones = [];
-  if (empresa.total_empleados == null) limitaciones.push('No hay N (total de empleados); la muestra requerida quedó en null.');
+  if (empresa.total_empleados == null) limitaciones.push('Sin el total de empleados, no se puede calcular cuántas respuestas hacen falta.');
   if (!representativeness.length) limitaciones.push('No hay plantilla por área; la representatividad no se calculó.');
   if (leaders.length < 5) limitaciones.push('Hay menos de 5 líderes; el espejo de liderazgo se interpreta con reserva.');
   if (employees.length < 5) limitaciones.push('Hay menos de 5 empleados; no se reportan subgrupos y el consenso es frágil.');
@@ -196,8 +196,8 @@ export function buildCultureInforme(metrics) {
       veredicto_validacion: decision.estado,
       lo_que_debe_saber: [
         `Cultura real (empleados n=${employees.length}): ${dominants.join(' y ') || 'sin perfil'} como valores dominantes.`,
-        `Alineación líderes–empleados: ${alignment ?? 'null'}. Fuerza cultural: ${force ?? 'null'} (${forceNivel || 'sin dato'}).`,
-        `Sello: ${decision.estado}. Muestra empleados ${employees.length} / requerida ${required ?? 'null'}.`,
+        `Alineación entre liderazgo y empleados: ${alignment ?? 'sin datos suficientes'}. Fuerza cultural: ${force ?? 'sin datos suficientes'}${forceNivel ? ` (${forceNivel})` : ''}.`,
+        `${sealText(decision.estado, nombre)} Respuestas de empleados: ${employees.length}${required == null ? '.' : ` de ${required} requeridas.`}`,
       ],
       verdad_incomoda: verdad,
     },
@@ -293,12 +293,14 @@ export function buildCultureInforme(metrics) {
         prioridad: 1,
         accion: decision.estado === 'validada'
           ? 'Use el perfil de empleados como filtro de candidatos durante 12 meses.'
-          : pendingText(decision)[0] || 'Complete N, plantilla y más respuestas de empleados antes de sellar.',
+          : pendingText(decision)[0] || 'Completa el total de empleados, la distribución por áreas y las respuestas pendientes antes de validar el perfil.',
         responsable_sugerido: 'Dirección de talento',
         plazo: '30_dias',
         indicador_de_exito: decision.estado === 'validada'
           ? 'Vacantes nuevas usan el perfil de empleados en el brief.'
-          : `Empleados ≥ ${required ?? 'muestra requerida'} y sello distinto de no_validada.`,
+          : required == null
+            ? 'La empresa informa su tamaño y reúne las respuestas necesarias para validar el perfil.'
+            : `Se reúnen al menos ${required} respuestas de empleados y se valida el perfil cultural.`,
       },
       {
         prioridad: 2,
@@ -307,16 +309,16 @@ export function buildCultureInforme(metrics) {
           : 'Sume respuestas de jefes y directivos para poder contrastar.',
         responsable_sugerido: 'Comité de liderazgo',
         plazo: '90_dias',
-        indicador_de_exito: 'Brechas críticas C01–C08 por debajo de 0,30.',
+        indicador_de_exito: 'Disminuyen las diferencias más marcadas entre lo que percibe el liderazgo y lo que vive el equipo.',
       },
       {
         prioridad: 3,
         accion: promises[0]
           ? `Deje de vender ${promises[0].necesidad} si los empleados no la confirman.`
-          : 'Alinee el mensaje de atracción con la oferta que sí marcan los empleados en O01.',
+          : 'Ajusta el mensaje de atracción a lo que los empleados sí reconocen en su día a día.',
         responsable_sugerido: 'Talento / marca empleadora',
         plazo: '90_dias',
-        indicador_de_exito: 'El anuncio de vacante cita solo necesidades con puntaje de empleados > 0.',
+        indicador_de_exito: 'El anuncio de la vacante menciona beneficios que los empleados reconocen en la práctica.',
       },
     ],
     sello_taleX: {

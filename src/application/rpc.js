@@ -470,7 +470,7 @@ export async function createRespondentApplication(actor, body) {
   if (!organizationId || !vacancyId) throw new ApiError(403, 'permission_denied');
   assertCanWriteOrg(actor, organizationId);
   const vacancy = await findOne('vacancies', {id: vacancyId});
-  if (!vacancy || vacancy.organization_id !== organizationId) {
+  if (!vacancy || vacancy.archived || vacancy.organization_id !== organizationId) {
     throw new ApiError(403, 'permission_denied');
   }
   const email = normalizeEmail(body.p_email);
